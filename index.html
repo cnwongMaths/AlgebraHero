@@ -1,0 +1,3485 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>代數勇者傳說：3D 回合制策略冒險</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet" />
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: 'Noto Sans TC', sans-serif;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0f172a;
+      color: #f8fafc;
+    }
+    #game-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 1;
+    }
+    .ui-layer {
+      position: relative;
+      z-index: 10;
+      pointer-events: none;
+      width: 100%;
+      height: 100%;
+    }
+    .pointer-auto {
+      pointer-events: auto;
+    }
+    /* Crisp Math Fraction & Exponent Styling */
+    .math-expr {
+      font-family: 'Times New Roman', 'Noto Sans TC', serif;
+      font-size: 1.2em;
+      letter-spacing: 0.02em;
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 3px;
+      vertical-align: middle;
+    }
+    .math-expr sup {
+      font-size: 0.72em;
+      line-height: 0;
+      position: relative;
+      top: -0.45em;
+      color: #fde047;
+      font-weight: bold;
+    }
+    .frac {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      vertical-align: middle;
+      margin: 0 4px;
+      font-size: 0.92em;
+      line-height: 1.1;
+    }
+    .frac > span.num {
+      border-bottom: 1.5px solid currentColor;
+      padding: 0 5px 2px 5px;
+      display: block;
+      text-align: center;
+    }
+    .frac > span.den {
+      padding: 2px 5px 0 5px;
+      display: block;
+      text-align: center;
+    }
+    /* Game Button Polish */
+    .rpg-btn {
+      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 0 rgba(0, 0, 0, 0.45), 0 6px 14px rgba(0, 0, 0, 0.35);
+    }
+    .rpg-btn:hover:not(:disabled) {
+      transform: translateY(-2px);
+      filter: brightness(1.08);
+    }
+    .rpg-btn:active:not(:disabled) {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+    }
+    .rpg-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    /* Floating Damage Numbers */
+    .floating-dmg {
+      position: fixed;
+      z-index: 25;
+      pointer-events: none;
+      font-weight: 900;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.9), 0 0 2px #000;
+      animation: floatUp 1.05s ease-out forwards;
+      white-space: nowrap;
+    }
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translate(-50%, 0) scale(0.85); }
+      20% { transform: translate(-50%, -18px) scale(1.18); }
+      100% { opacity: 0; transform: translate(-50%, -68px) scale(0.95); }
+    }
+    /* Custom Scrollbar for Modals */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 999px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.45);
+      border-radius: 999px;
+    }
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 12px rgba(250, 204, 21, 0.55); }
+      50% { box-shadow: 0 0 24px rgba(250, 204, 21, 0.95); }
+    }
+    .glow-gold {
+      animation: pulseGlow 2s infinite;
+    }
+    @keyframes ultPulse {
+      0%, 100% { box-shadow: 0 0 14px rgba(244, 63, 94, 0.7); transform: scale(1); }
+      50% { box-shadow: 0 0 28px rgba(251, 113, 133, 1); transform: scale(1.03); }
+    }
+    .glow-ult {
+      animation: ultPulse 1.4s infinite;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Three.js 3D Viewport -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Main HUD Overlay -->
+  <div class="ui-layer flex flex-col justify-between p-2 sm:p-4">
+
+    <!-- TOP BAR: Hero Stats, Turn Indicator + Enemy HUD, Difficulty & Modals -->
+    <div class="flex flex-wrap items-start justify-between gap-2 w-full">
+
+      <!-- Left: Hero Status Panel -->
+      <div class="pointer-auto bg-slate-900/88 backdrop-blur-md border border-slate-700/80 rounded-2xl p-2.5 sm:p-3 shadow-xl min-w-[250px] sm:min-w-[300px]">
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="flex items-center gap-2">
+            <span id="hero-lvl-badge" class="bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 font-black text-xs sm:text-sm px-2.5 py-0.5 rounded-lg shadow">
+              Lv.1
+            </span>
+            <span class="font-bold text-sm sm:text-base text-white tracking-wide">代數見習勇者</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span id="shield-badge" class="hidden text-[11px] font-black bg-cyan-500/25 text-cyan-200 px-2 py-0.5 rounded-full border border-cyan-400">
+              🛡️ 護盾 80%
+            </span>
+            <span id="atk-buff-badge" class="hidden text-[11px] font-bold bg-purple-600/90 text-purple-100 px-2 py-0.5 rounded-full border border-purple-400">
+              ⚡ +0%
+            </span>
+          </div>
+        </div>
+
+        <!-- HP Bar -->
+        <div class="mb-1.5">
+          <div class="flex justify-between text-[11px] font-semibold text-slate-300 mb-0.5">
+            <span>❤️ 生命值 (HP)</span>
+            <span id="hero-hp-text">140 / 140</span>
+          </div>
+          <div class="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+            <div id="hero-hp-bar" class="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all duration-300" style="width: 100%"></div>
+          </div>
+        </div>
+
+        <!-- MP & Rage Bars Side-by-Side -->
+        <div class="grid grid-cols-2 gap-2 mb-1.5">
+          <div>
+            <div class="flex justify-between text-[10px] font-semibold text-sky-300 mb-0.5">
+              <span>💧 魔力 (MP)</span>
+              <span id="hero-mp-text">60/100</span>
+            </div>
+            <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+              <div id="hero-mp-bar" class="h-full bg-gradient-to-r from-sky-500 to-cyan-400 transition-all duration-300" style="width: 60%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-[10px] font-semibold text-rose-300 mb-0.5">
+              <span>🔥 奧義怒氣</span>
+              <span id="hero-rage-text">0%</span>
+            </div>
+            <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+              <div id="hero-rage-bar" class="h-full bg-gradient-to-r from-orange-500 to-rose-500 transition-all duration-300" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- EXP Bar -->
+        <div class="mb-2">
+          <div class="flex justify-between text-[10px] font-semibold text-slate-400 mb-0.5">
+            <span>✨ 經驗值 (EXP)</span>
+            <span id="hero-exp-text">0 / 100</span>
+          </div>
+          <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+            <div id="hero-exp-bar" class="h-full bg-gradient-to-r from-indigo-500 to-purple-400 transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Resources & Weapon Summary -->
+        <div class="grid grid-cols-4 gap-1 text-center text-xs bg-slate-800/80 rounded-xl p-1.5 border border-slate-700/60">
+          <div>
+            <div class="text-slate-400 text-[10px]">攻擊力</div>
+            <div id="hero-atk-text" class="font-bold text-amber-300">⚔️ 20</div>
+          </div>
+          <div>
+            <div class="text-slate-400 text-[10px]">金幣</div>
+            <div id="hero-gold-text" class="font-bold text-yellow-400">🪙 50</div>
+          </div>
+          <div>
+            <div class="text-slate-400 text-[10px]">代數礦石</div>
+            <div id="hero-ore-text" class="font-bold text-cyan-300">💎 1</div>
+          </div>
+          <div>
+            <div class="text-slate-400 text-[10px]">總積分</div>
+            <div id="hero-score-text" class="font-bold text-emerald-300">🏅 0</div>
+          </div>
+        </div>
+        <div class="mt-1.5 flex items-center justify-between text-[11px] text-slate-300 px-1">
+          <span>裝備：<strong id="hero-weapon-name" class="text-amber-300">木製練習劍</strong></span>
+          <button onclick="resetCameraAngle()" class="text-sky-300 hover:text-sky-200 underline font-semibold">🎥 重置視角</button>
+        </div>
+      </div>
+
+      <!-- Center: Turn Banner + Enemy Boss / Monster Health & Intent Bar -->
+      <div class="pointer-auto flex flex-col items-center gap-1.5 w-full sm:w-auto sm:min-w-[340px] order-3 sm:order-2">
+        <!-- Turn Banner -->
+        <div id="turn-banner" class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-amber-400/70 rounded-full px-4 py-1 shadow-lg flex items-center gap-2">
+          <span id="turn-number-badge" class="bg-amber-400 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">第 1 回合</span>
+          <span id="turn-phase-text" class="text-xs sm:text-sm font-black text-amber-200 tracking-wide">⚔️ 勇者行動階段 — 請選擇指令</span>
+        </div>
+
+        <!-- Enemy HUD Card -->
+        <div id="enemy-hud" class="bg-slate-900/88 backdrop-blur-md border border-rose-500/50 rounded-2xl p-2.5 sm:p-3 shadow-xl w-full">
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <div class="flex items-center gap-1.5">
+              <span id="stage-badge" class="bg-rose-600 text-white text-[11px] font-bold px-2 py-0.5 rounded-md">第 1 關</span>
+              <span id="enemy-name" class="font-black text-sm sm:text-base text-rose-200">史萊姆算子</span>
+            </div>
+            <span id="enemy-lvl" class="text-xs font-bold text-rose-300">Lv.1</span>
+          </div>
+          <div class="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden border border-rose-900/80 relative">
+            <div id="enemy-hp-bar" class="h-full bg-gradient-to-r from-rose-600 via-red-500 to-orange-500 transition-all duration-200" style="width: 100%"></div>
+            <span id="enemy-hp-text" class="absolute inset-0 flex items-center justify-center text-[10px] font-black text-white drop-shadow">
+              100 / 100
+            </span>
+          </div>
+
+          <!-- Enemy Next-Turn Intent Forecast -->
+          <div id="enemy-intent-box" class="mt-1.5 bg-rose-950/70 border border-rose-500/40 rounded-xl px-2.5 py-1 flex items-center justify-between text-xs">
+            <span class="text-rose-300 font-bold">👁️ 下回合意圖：</span>
+            <span id="enemy-intent-text" class="font-black text-amber-200">⚔️ 準備普通撕咬 (約 10 傷)</span>
+          </div>
+
+          <div class="flex items-center justify-between mt-1.5 gap-1">
+            <button onclick="prevStage()" class="rpg-btn bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-2 py-1 rounded-lg border border-slate-600">
+              ◀ 上一關
+            </button>
+            <span id="enemy-trait" class="text-[11px] text-slate-300 truncate">入門怪獸 · 適合練習基礎運算</span>
+            <button onclick="nextStage()" class="rpg-btn bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-2 py-1 rounded-lg border border-slate-600">
+              下一關 ▶
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Difficulty Tier Selector & Quick Modals -->
+      <div class="pointer-auto flex flex-col items-end gap-1.5 order-2 sm:order-3">
+        <!-- Difficulty Pills -->
+        <div class="bg-slate-900/85 backdrop-blur-md border border-slate-700 rounded-2xl p-1.5 flex items-center gap-1 shadow-lg">
+          <span class="text-[11px] text-slate-400 font-bold px-1.5 hidden md:inline">題庫難度：</span>
+          <button id="diff-basic" onclick="setDifficulty('basic')" class="diff-btn px-2.5 py-1 rounded-xl text-xs font-black transition bg-emerald-500 text-slate-950 shadow">
+            基礎
+          </button>
+          <button id="diff-extended" onclick="setDifficulty('extended')" class="diff-btn px-2.5 py-1 rounded-xl text-xs font-black transition bg-slate-800 text-slate-300 hover:bg-slate-700">
+            延展
+          </button>
+          <button id="diff-challenge" onclick="setDifficulty('challenge')" class="diff-btn px-2.5 py-1 rounded-xl text-xs font-black transition bg-slate-800 text-slate-300 hover:bg-slate-700">
+            挑戰
+          </button>
+        </div>
+
+        <!-- Action Menu Buttons -->
+        <div class="flex items-center gap-1.5">
+          <button onclick="openBlacksmith()" class="rpg-btn bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 font-black text-xs sm:text-sm px-3 py-2 rounded-xl flex items-center gap-1">
+            <span>⚒️</span><span>鍛造工坊</span>
+          </button>
+          <button onclick="openFormulaSheet()" class="rpg-btn bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm px-3 py-2 rounded-xl border border-indigo-400/50 flex items-center gap-1">
+            <span>📖</span><span>公式筆記</span>
+          </button>
+          <button id="mute-btn" onclick="toggleMute()" class="rpg-btn bg-slate-800/90 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm p-2 rounded-xl border border-slate-600" title="音效開關">
+            🔊
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- CENTER NOTIFICATION TOAST & BATTLE LOG -->
+    <div class="flex flex-col items-center gap-1.5">
+      <div id="toast-banner" class="pointer-events-none opacity-0 transition-opacity duration-300 bg-slate-900/95 border border-amber-400/70 text-amber-200 font-bold text-xs sm:text-sm px-4 py-2 rounded-full shadow-2xl">
+        提示訊息
+      </div>
+    </div>
+
+    <!-- BOTTOM ACTION BAR: Turn-Based Strategy Command Deck -->
+    <div class="flex flex-col items-center w-full">
+      <div id="command-deck" class="pointer-auto grid grid-cols-2 sm:grid-cols-5 gap-2 bg-slate-900/90 backdrop-blur-md p-2.5 sm:p-3 rounded-3xl border border-slate-700/90 shadow-2xl max-w-4xl w-full">
+
+        <!-- 1. Normal Attack -->
+        <button id="cmd-normal" onclick="cmdNormalAttack()" class="cmd-btn rpg-btn bg-gradient-to-b from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white rounded-2xl p-2.5 border border-slate-500 flex flex-col items-center justify-center text-center">
+          <div class="text-lg sm:text-xl mb-0.5">⚔️</div>
+          <div class="font-black text-xs sm:text-sm">普通斬擊</div>
+          <div class="text-[10px] text-sky-300 font-semibold mt-0.5">65% 傷 · +20 MP</div>
+        </button>
+
+        <!-- 2. Algebra Power Strike (Math Quiz) -->
+        <button id="cmd-power" onclick="cmdAlgebraPowerStrike()" class="cmd-btn rpg-btn glow-gold bg-gradient-to-b from-amber-400 via-amber-500 to-orange-600 text-slate-950 rounded-2xl p-2.5 border-2 border-yellow-200 flex flex-col items-center justify-center text-center">
+          <div class="text-lg sm:text-xl mb-0.5">⚡</div>
+          <div class="font-black text-xs sm:text-sm">聚力代數斬</div>
+          <div class="text-[10px] text-slate-900 font-extrabold mt-0.5">解題 300% 暴擊 +10%攻</div>
+        </button>
+
+        <!-- 3. Identity Shield (Math Quiz) -->
+        <button id="cmd-shield" onclick="cmdIdentityShield()" class="cmd-btn rpg-btn bg-gradient-to-b from-cyan-500 to-blue-700 text-white rounded-2xl p-2.5 border border-cyan-300/70 flex flex-col items-center justify-center text-center">
+          <div class="text-lg sm:text-xl mb-0.5">🛡️</div>
+          <div class="font-black text-xs sm:text-sm">恆等式護盾</div>
+          <div class="text-[10px] text-cyan-100 font-semibold mt-0.5">解題減傷 80% + 反彈</div>
+        </button>
+
+        <!-- 4. Algebra Heal (MP or Math Quiz) -->
+        <button id="cmd-heal" onclick="cmdAlgebraHeal()" class="cmd-btn rpg-btn bg-gradient-to-b from-emerald-500 to-teal-700 text-white rounded-2xl p-2.5 border border-emerald-300/70 flex flex-col items-center justify-center text-center">
+          <div class="text-lg sm:text-xl mb-0.5">💚</div>
+          <div class="font-black text-xs sm:text-sm">生命回復術</div>
+          <div id="cmd-heal-sub" class="text-[10px] text-emerald-100 font-semibold mt-0.5">耗 30 MP / 解題回 35%</div>
+        </button>
+
+        <!-- 5. Ultimate Skill (100% Rage) -->
+        <button id="cmd-ult" onclick="cmdUltimateSkill()" disabled class="cmd-btn rpg-btn col-span-2 sm:col-span-1 bg-gradient-to-b from-rose-600 to-purple-900 text-white rounded-2xl p-2.5 border border-rose-400/70 flex flex-col items-center justify-center text-center">
+          <div class="text-lg sm:text-xl mb-0.5">🔥</div>
+          <div class="font-black text-xs sm:text-sm">微積分前奏</div>
+          <div id="cmd-ult-sub" class="text-[10px] text-rose-200 font-semibold mt-0.5">需 100% 怒氣 (450% 傷)</div>
+        </button>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MODAL 1: MATH CHALLENGE MODAL (COMBAT & POST-BATTLE CHEST) -->
+  <!-- ========================================================= -->
+  <div id="math-modal" class="hidden fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900 border-2 border-amber-400/80 rounded-3xl max-w-xl w-full p-4 sm:p-6 shadow-2xl relative overflow-hidden">
+      <!-- Header Tag -->
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span id="math-modal-mode-badge" class="bg-amber-500 text-slate-950 font-black text-xs px-3 py-1 rounded-full">
+            ⚡ 戰鬥聚力解題
+          </span>
+          <span id="math-modal-topic-badge" class="bg-slate-800 text-cyan-300 border border-cyan-500/40 font-bold text-xs px-2.5 py-1 rounded-full">
+            正整數指數律
+          </span>
+        </div>
+        <span id="math-modal-diff-badge" class="text-xs font-black px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+          基礎級
+        </span>
+      </div>
+
+      <!-- Pre-Question Difficulty & Effect Selector -->
+      <div class="bg-slate-950/70 border border-slate-700/80 rounded-2xl p-2.5 mb-3">
+        <div class="flex items-center justify-between text-[11px] text-slate-400 font-bold mb-1.5 px-1">
+          <span>🎯 選擇本題難度（難度越高，技能威力越強）：</span>
+          <span id="math-effect-preview" class="text-amber-300 font-black">220% 暴擊 +6%攻</span>
+        </div>
+        <div class="grid grid-cols-3 gap-1.5">
+          <button id="modal-diff-basic" onclick="switchQuestionDifficultyInModal('basic')" class="py-1.5 px-2 rounded-xl text-xs font-black transition border">
+            🌱 基礎 (入門)
+          </button>
+          <button id="modal-diff-extended" onclick="switchQuestionDifficultyInModal('extended')" class="py-1.5 px-2 rounded-xl text-xs font-black transition border">
+            ⚡ 延展 (標準)
+          </button>
+          <button id="modal-diff-challenge" onclick="switchQuestionDifficultyInModal('challenge')" class="py-1.5 px-2 rounded-xl text-xs font-black transition border">
+            🔥 挑戰 (極限)
+          </button>
+        </div>
+      </div>
+
+      <!-- Question Prompt -->
+      <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-4 mb-4">
+        <div id="math-question-text" class="text-base sm:text-xl font-bold text-white leading-relaxed">
+          化簡：<span class="math-expr">2a<sup>6</sup> &times; 8a<sup>14</sup></span>
+        </div>
+      </div>
+
+      <!-- 4 Multiple Choice Options -->
+      <div id="math-options-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-4">
+        <!-- Populated dynamically -->
+      </div>
+
+      <!-- Step-by-Step Feedback Box (Shown after selection) -->
+      <div id="math-feedback-box" class="hidden rounded-2xl p-3.5 mb-4 border text-sm">
+        <div id="math-feedback-title" class="font-black text-base mb-1"></div>
+        <div id="math-feedback-exp" class="text-slate-200 leading-relaxed"></div>
+      </div>
+
+      <!-- Continue / Execute Button -->
+      <div class="flex justify-end">
+        <button id="math-continue-btn" onclick="resolveMathModal()" class="hidden rpg-btn bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 font-black text-sm sm:text-base px-6 py-2.5 rounded-xl">
+          發動攻擊！ ⚔️
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MODAL 2: POST-BATTLE VICTORY & TREASURE CHEST MODAL       -->
+  <!-- ========================================================= -->
+  <div id="victory-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900/95 border-2 border-yellow-400 rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl text-center">
+      <div class="text-5xl mb-2">🏆</div>
+      <h2 class="text-2xl font-black text-yellow-300 mb-1">關卡討伐勝利！</h2>
+      <p id="victory-enemy-name" class="text-sm text-slate-300 mb-4">你成功擊敗了怪獸！</p>
+
+      <!-- Loot Box Card -->
+      <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-4 mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">戰利品寶箱與回合評級</span>
+          <span id="victory-rank-badge" class="bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950 font-black text-xs px-2.5 py-0.5 rounded-full shadow">
+            評級 S · 速戰速決！
+          </span>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+          <div class="bg-slate-900/90 p-2 rounded-xl border border-emerald-500/40">
+            <div class="text-xs text-slate-400">戰績積分</div>
+            <div id="rew-score" class="font-black text-emerald-300 text-sm sm:text-base">+500 🏅</div>
+          </div>
+          <div class="bg-slate-900/90 p-2 rounded-xl border border-slate-700">
+            <div class="text-xs text-slate-400">經驗值</div>
+            <div id="rew-exp" class="font-black text-indigo-300 text-sm sm:text-base">+55 EXP</div>
+          </div>
+          <div class="bg-slate-900/90 p-2 rounded-xl border border-slate-700">
+            <div class="text-xs text-slate-400">金幣</div>
+            <div id="rew-gold" class="font-black text-yellow-400 text-sm sm:text-base">+45 🪙</div>
+          </div>
+          <div class="bg-slate-900/90 p-2 rounded-xl border border-slate-700">
+            <div class="text-xs text-slate-400">代數礦石</div>
+            <div id="rew-ore" class="font-black text-cyan-300 text-sm sm:text-base">+1 💎</div>
+          </div>
+        </div>
+        <div id="chest-upgrade-status" class="mt-2.5 text-xs font-bold text-amber-300 bg-amber-500/10 py-1.5 px-3 rounded-xl border border-amber-500/30">
+          📦 青銅寶箱：破解【黃金密碼鎖】可將所有獎勵翻倍！
+        </div>
+      </div>
+
+      <!-- Two Choices: Challenge Chest Multiplier OR Claim Directly -->
+      <div class="flex flex-col gap-2.5">
+        <button id="btn-chest-challenge" onclick="triggerChestBonusQuestion()" class="rpg-btn glow-gold bg-gradient-to-r from-yellow-400 via-amber-500 to-orange-500 text-slate-950 font-black text-sm sm:text-base py-3 px-4 rounded-xl">
+          🔐 挑戰代數密碼鎖 (獎勵倍增！)
+        </button>
+        <button onclick="claimVictoryRewards()" class="rpg-btn bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm py-2.5 px-4 rounded-xl border border-slate-600">
+          直接領取獎勵並前往下一關 ➔
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MODAL 1.5: DEFEAT / GAME OVER & ALGEBRA REVIVAL MODAL     -->
+  <!-- ========================================================= -->
+  <div id="defeat-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900/95 border-2 border-rose-500 rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl text-center">
+      <div class="text-5xl mb-2">💀</div>
+      <h2 class="text-2xl font-black text-rose-400 mb-1">勇者力竭倒下！</h2>
+      <p id="defeat-reason-text" class="text-sm text-slate-300 mb-4">你的生命值已歸零，敵人太強大了！</p>
+
+      <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-3.5 mb-4 text-xs text-slate-300 leading-relaxed">
+        💡 <strong>復活提示：</strong>你可以挑戰【代數復甦試煉】原地滿血復活繼續戰鬥，或返回第 1 關重新鍛造更強的武器！
+      </div>
+
+      <div class="flex flex-col gap-2.5">
+        <button onclick="triggerReviveChallenge()" class="rpg-btn glow-gold bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-500 text-slate-950 font-black text-sm sm:text-base py-3 px-4 rounded-xl">
+          ✨ 解題原地復活 (回復 100% 生命)
+        </button>
+        <button onclick="retreatAndHeal()" class="rpg-btn bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm py-2.5 px-4 rounded-xl border border-slate-600">
+          🏕️ 撤退回第 1 關並恢復狀態
+        </button>
+        <button onclick="fullRestartGame()" class="rpg-btn bg-rose-950/90 hover:bg-rose-900 text-rose-200 font-bold text-xs py-2 px-4 rounded-xl border border-rose-700/70">
+          🔄 完全重新開始冒險 (重置等級與關卡)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MODAL 3: BLACKSMITH / WEAPON CRAFTING MODAL               -->
+  <!-- ========================================================= -->
+  <div id="blacksmith-modal" class="hidden fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900 border-2 border-amber-500/80 rounded-3xl max-w-2xl w-full max-h-[88vh] flex flex-col p-4 sm:p-6 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-black text-amber-400 flex items-center gap-2">
+            <span>⚒️</span><span>代數神兵鍛造工坊</span>
+          </h2>
+          <p class="text-xs text-slate-400">消耗討伐怪獸獲得的金幣與代數礦石，打造傳說 3D 武器！</p>
+        </div>
+        <button onclick="closeModal('blacksmith-modal')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 w-9 h-9 rounded-xl font-black">✕</button>
+      </div>
+
+      <!-- Current Resources Banner -->
+      <div class="flex items-center justify-around bg-slate-800/80 rounded-xl p-2.5 my-3 border border-slate-700 text-sm font-bold">
+        <span>持有金幣：<strong id="bs-gold" class="text-yellow-400">50 🪙</strong></span>
+        <span>持有代數礦石：<strong id="bs-ore" class="text-cyan-300">1 💎</strong></span>
+        <span>基礎攻擊力：<strong id="bs-atk" class="text-amber-300">18 ⚔️</strong></span>
+      </div>
+
+      <!-- Weapon List -->
+      <div id="weapon-list" class="overflow-y-auto space-y-2.5 pr-1 flex-1">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MODAL 4: F.2 ALGEBRA FORMULA CHEAT-SHEET (公式重溫筆記)    -->
+  <!-- ========================================================= -->
+  <div id="formula-modal" class="hidden fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900 border-2 border-indigo-400/80 rounded-3xl max-w-3xl w-full max-h-[88vh] flex flex-col p-4 sm:p-6 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-black text-indigo-300 flex items-center gap-2">
+            <span>📖</span><span>中二數學核心公式秘笈</span>
+          </h2>
+          <p class="text-xs text-slate-400">涵蓋指數律、多項式因式分解、恆等式、代數分式及主項變換</p>
+        </div>
+        <button onclick="closeModal('formula-modal')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 w-9 h-9 rounded-xl font-black">✕</button>
+      </div>
+
+      <div class="overflow-y-auto space-y-3 mt-3 pr-1 text-sm leading-relaxed">
+        <!-- Card 1 -->
+        <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-3.5">
+          <h3 class="font-black text-amber-300 mb-1.5">1. 正整數指數律 (Laws of Positive Integral Indices)</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-200">
+            <div>• 同底數相乘：<span class="math-expr">a<sup>m</sup> &times; a<sup>n</sup> = a<sup>m+n</sup></span></div>
+            <div>• 同底數相除：<span class="math-expr">a<sup>m</sup> &divide; a<sup>n</sup> = a<sup>m-n</sup></span> (m &gt; n)</div>
+            <div>• 冪的乘方：<span class="math-expr">(a<sup>m</sup>)<sup>n</sup> = a<sup>mn</sup></span></div>
+            <div>• 積與商的冪：<span class="math-expr">(ab)<sup>n</sup> = a<sup>n</sup>b<sup>n</sup></span> ， <span class="math-expr">(<span class="frac"><span class="num">a</span><span class="den">b</span></span>)<sup>n</sup> = <span class="frac"><span class="num">a<sup>n</sup></span><span class="den">b<sup>n</sup></span></span></span></div>
+          </div>
+        </div>
+
+        <!-- Card 2 -->
+        <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-3.5">
+          <h3 class="font-black text-emerald-300 mb-1.5">2. 重要代數恆等式 (Algebraic Identities)</h3>
+          <div class="space-y-1.5 text-slate-200">
+            <div>• <strong>平方差公式 (Difference of Two Squares)</strong>：<span class="math-expr">(a + b)(a - b) &equiv; a<sup>2</sup> - b<sup>2</sup></span></div>
+            <div>• <strong>完全平方公式 (Perfect Squares)</strong>：<span class="math-expr">(a + b)<sup>2</sup> &equiv; a<sup>2</sup> + 2ab + b<sup>2</sup></span></div>
+            <div>• <strong>完全平方差公式</strong>：<span class="math-expr">(a - b)<sup>2</sup> &equiv; a<sup>2</sup> - 2ab + b<sup>2</sup></span></div>
+            <div class="text-xs text-slate-400">💡 恆等式性質：左右兩邊展開後，同類項係數及常數項必完全相等！</div>
+          </div>
+        </div>
+
+        <!-- Card 3 -->
+        <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-3.5">
+          <h3 class="font-black text-cyan-300 mb-1.5">3. 多項式展開與因式分解 (Polynomials &amp; Factorization)</h3>
+          <div class="space-y-1 text-slate-200">
+            <div>• <strong>提取公因式</strong>：<span class="math-expr">ma + mb = m(a + b)</span>；注意變號技巧：<span class="math-expr">(1 - 5m) = -(5m - 1)</span></div>
+            <div>• <strong>併項法 (Grouping)</strong>：<span class="math-expr">ab + b + 2a + 2 = b(a + 1) + 2(a + 1) = (a + 1)(b + 2)</span></div>
+          </div>
+        </div>
+
+        <!-- Card 4 -->
+        <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-3.5">
+          <h3 class="font-black text-rose-300 mb-1.5">4. 代數分式與主項變換 (Algebraic Fractions &amp; Change of Subject)</h3>
+          <div class="space-y-1 text-slate-200">
+            <div>• <strong>約簡原則</strong>：必須先進行<strong>因式分解</strong>（成乘法形式）才可約去公因式，切勿直接約去加減項！</div>
+            <div>• <strong>異分母加減</strong>：先求分母的 L.C.M. 進行通分，再合併分子同類項。</div>
+            <div>• <strong>主項變換</strong>：去分母 ➔ 拆括號 ➔ 把含新主項的項移至同一邊 ➔ 提取公因式並除過去。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/**
+ * ============================================================================
+ * 1. WEB AUDIO API SYNTHESIZER (Zero External Audio Dependencies)
+ * ============================================================================
+ */
+class SoundFX {
+  constructor() {
+    this.ctx = null;
+    this.muted = false;
+  }
+  init() {
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) this.ctx = new AudioCtx();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+  playTone(freq, type, duration, vol = 0.2, slideTo = null) {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+    if (slideTo) {
+      osc.frequency.exponentialRampToValueAtTime(slideTo, this.ctx.currentTime + duration);
+    }
+    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start();
+    osc.stop(this.ctx.currentTime + duration);
+  }
+  slash() {
+    this.playTone(340, 'sawtooth', 0.14, 0.16, 90);
+  }
+  critSlash() {
+    this.playTone(520, 'square', 0.12, 0.2, 880);
+    setTimeout(() => this.playTone(760, 'sawtooth', 0.25, 0.25, 140), 70);
+  }
+  hitPlayer() {
+    this.playTone(150, 'sawtooth', 0.22, 0.22, 55);
+  }
+  correct() {
+    this.playTone(523.25, 'sine', 0.12, 0.2);
+    setTimeout(() => this.playTone(659.25, 'sine', 0.12, 0.2), 90);
+    setTimeout(() => this.playTone(783.99, 'triangle', 0.25, 0.25), 180);
+  }
+  wrong() {
+    this.playTone(220, 'sawtooth', 0.18, 0.2, 160);
+    setTimeout(() => this.playTone(155, 'sawtooth', 0.28, 0.2, 110), 140);
+  }
+  levelUp() {
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((n, i) => {
+      setTimeout(() => this.playTone(n, 'triangle', 0.24, 0.22), i * 100);
+    });
+  }
+  craft() {
+    this.playTone(920, 'square', 0.08, 0.22, 420);
+    setTimeout(() => this.playTone(1180, 'triangle', 0.25, 0.25, 600), 120);
+  }
+  shieldUp() {
+    this.playTone(320, 'sine', 0.15, 0.2, 640);
+    setTimeout(() => this.playTone(640, 'triangle', 0.22, 0.22, 960), 90);
+  }
+  heal() {
+    this.playTone(440, 'sine', 0.14, 0.2, 554.37);
+    setTimeout(() => this.playTone(554.37, 'sine', 0.14, 0.2, 659.25), 90);
+    setTimeout(() => this.playTone(880, 'sine', 0.28, 0.22), 180);
+  }
+  ultimate() {
+    this.playTone(220, 'sawtooth', 0.15, 0.25, 880);
+    setTimeout(() => this.playTone(440, 'square', 0.2, 0.25, 110), 120);
+    setTimeout(() => this.playTone(660, 'sawtooth', 0.35, 0.28, 80), 240);
+  }
+}
+const sfx = new SoundFX();
+
+function toggleMute() {
+  sfx.muted = !sfx.muted;
+  document.getElementById('mute-btn').textContent = sfx.muted ? '🔇' : '🔊';
+  showToast(sfx.muted ? '已靜音' : '音效已開啟');
+}
+
+/**
+ * ============================================================================
+ * 2. WEAPONS & STAGE MONSTERS DATA
+ * ============================================================================
+ */
+const WEAPONS = [
+  {
+    id: 0,
+    name: '木製練習劍',
+    atkBonus: 0,
+    goldCost: 0,
+    oreCost: 0,
+    color: 0xd97706,
+    emissive: 0x000000,
+    scale: 1.0,
+    style: 'sword',
+    desc: '勇者起步的木劍，刻有基礎運算符號。'
+  },
+  {
+    id: 1,
+    name: '指數之刃 (Index Blade)',
+    atkBonus: 18,
+    goldCost: 130,
+    oreCost: 3,
+    color: 0x38bdf8,
+    emissive: 0x0284c7,
+    scale: 1.15,
+    style: 'sword',
+    desc: '凝聚正整數指數律之力的藍晶長劍，攻速與威力兼備。'
+  },
+  {
+    id: 2,
+    name: '多項式戰斧 (Polynomial Axe)',
+    atkBonus: 42,
+    goldCost: 360,
+    oreCost: 7,
+    color: 0xf97316,
+    emissive: 0xc2410c,
+    scale: 1.25,
+    style: 'axe',
+    desc: '能將繁複多項式一分為二的熾熱重斧，大幅提升暴擊傷害。'
+  },
+  {
+    id: 3,
+    name: '恆等式聖劍 (Identity Excalibur)',
+    atkBonus: 78,
+    goldCost: 820,
+    oreCost: 15,
+    color: 0xfacc15,
+    emissive: 0xca8a04,
+    scale: 1.38,
+    style: 'greatsword',
+    desc: '蘊含平方差與完全平方恆等式的神聖巨劍，光芒萬丈。'
+  },
+  {
+    id: 4,
+    name: '代數分式神戟 (Rational Halberd)',
+    atkBonus: 130,
+    goldCost: 1750,
+    oreCost: 28,
+    color: 0xe879f9,
+    emissive: 0xa21caf,
+    scale: 1.5,
+    style: 'halberd',
+    desc: '終極傳說神兵！約簡一切混沌，主項變換無堅不摧。'
+  }
+];
+
+const STAGES = [
+  {
+    stage: 1,
+    name: '史萊姆算子',
+    lvl: 1,
+    maxHp: 150,
+    atk: 16,
+    exp: 55,
+    gold: 45,
+    ore: 1,
+    color: 0x22c55e,
+    type: 'slime',
+    trait: '入門怪獸 · 學會用護盾抵擋重擊'
+  },
+  {
+    stage: 2,
+    name: '指數哥布林',
+    lvl: 2,
+    maxHp: 260,
+    atk: 26,
+    exp: 90,
+    gold: 80,
+    ore: 1,
+    color: 0x84cc16,
+    type: 'goblin',
+    trait: '指數狂熱 · 擅長快速連擊與干擾'
+  },
+  {
+    stage: 3,
+    name: '多項式石魔',
+    lvl: 3,
+    maxHp: 420,
+    atk: 38,
+    exp: 145,
+    gold: 130,
+    ore: 2,
+    color: 0x64748b,
+    type: 'golem',
+    trait: '高防厚甲 · 需靠解題暴擊突破'
+  },
+  {
+    stage: 4,
+    name: '恆等式暗黑騎士',
+    lvl: 4,
+    maxHp: 640,
+    atk: 54,
+    exp: 225,
+    gold: 210,
+    ore: 3,
+    color: 0x6366f1,
+    type: 'knight',
+    trait: '對稱劍術 · 蓄力斬極具威脅'
+  },
+  {
+    stage: 5,
+    name: '分式混沌法師',
+    lvl: 5,
+    maxHp: 950,
+    atk: 74,
+    exp: 340,
+    gold: 315,
+    ore: 4,
+    color: 0xd946ef,
+    type: 'mage',
+    trait: '魔力干擾 · 善用護盾反制魔彈'
+  },
+  {
+    stage: 6,
+    name: '終焉代數巨龍 BOSS',
+    lvl: 6,
+    maxHp: 1500,
+    atk: 102,
+    exp: 600,
+    gold: 580,
+    ore: 7,
+    color: 0xef4444,
+    type: 'dragon',
+    trait: '最終頭目 · 統御所有代數法則！'
+  }
+];
+
+/**
+ * ============================================================================
+ * 3. HONG KONG F.2 ALGEBRA QUESTION BANK (42 QUESTIONS: 14 BASIC / 14 EXT / 14 CHAL)
+ * ============================================================================
+ */
+const QUESTION_BANK = {
+  basic: [
+    // Super-friendly Introductory Basic Questions
+    {
+      topic: '基礎代數化簡',
+      q: '化簡：<span class="math-expr">3x + 5x</span>',
+      options: [
+        '<span class="math-expr">8x</span>',
+        '<span class="math-expr">8x<sup>2</sup></span>',
+        '<span class="math-expr">15x</span>',
+        '<span class="math-expr">15x<sup>2</sup></span>'
+      ],
+      ans: 0,
+      exp: '同類項相加，係數相加：<span class="math-expr">(3 + 5)x = 8x</span>。'
+    },
+    {
+      topic: '基礎代數化簡',
+      q: '化簡：<span class="math-expr">9y - 4y</span>',
+      options: [
+        '<span class="math-expr">5y</span>',
+        '<span class="math-expr">5</span>',
+        '<span class="math-expr">13y</span>',
+        '<span class="math-expr">-5y</span>'
+      ],
+      ans: 0,
+      exp: '同類項相減：<span class="math-expr">(9 - 4)y = 5y</span>。'
+    },
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr">a<sup>3</sup> &times; a<sup>4</sup></span>',
+      options: [
+        '<span class="math-expr">a<sup>7</sup></span>',
+        '<span class="math-expr">a<sup>12</sup></span>',
+        '<span class="math-expr">2a<sup>7</sup></span>',
+        '<span class="math-expr">a<sup>1</sup></span>'
+      ],
+      ans: 0,
+      exp: '同底數相乘，指數相加：<span class="math-expr">a<sup>3+4</sup> = a<sup>7</sup></span>。'
+    },
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr">m<sup>8</sup> &divide; m<sup>2</sup></span>',
+      options: [
+        '<span class="math-expr">m<sup>6</sup></span>',
+        '<span class="math-expr">m<sup>4</sup></span>',
+        '<span class="math-expr">m<sup>10</sup></span>',
+        '<span class="math-expr">m<sup>16</sup></span>'
+      ],
+      ans: 0,
+      exp: '同底數相除，指數相減：<span class="math-expr">m<sup>8-2</sup> = m<sup>6</sup></span>。'
+    },
+    {
+      topic: '多項式展開',
+      q: '展開：<span class="math-expr">4(x + 3)</span>',
+      options: [
+        '<span class="math-expr">4x + 12</span>',
+        '<span class="math-expr">4x + 3</span>',
+        '<span class="math-expr">4x + 7</span>',
+        '<span class="math-expr">7x</span>'
+      ],
+      ans: 0,
+      exp: '分配律：<span class="math-expr">4 &times; x + 4 &times; 3 = 4x + 12</span>。'
+    },
+    {
+      topic: '多項式因式分解',
+      q: '因式分解：<span class="math-expr">5x + 15</span>',
+      options: [
+        '<span class="math-expr">5(x + 3)</span>',
+        '<span class="math-expr">5(x + 15)</span>',
+        '<span class="math-expr">15(x + 1)</span>',
+        '<span class="math-expr">5(x + 10)</span>'
+      ],
+      ans: 0,
+      exp: '提取公因式 <span class="math-expr">5</span>：<span class="math-expr">5x + 5 &times; 3 = 5(x + 3)</span>。'
+    },
+    {
+      topic: '代數式求值',
+      q: '若 <span class="math-expr">x = 4</span>，求 <span class="math-expr">2x + 3</span> 的值。',
+      options: ['11', '9', '27', '14'],
+      ans: 0,
+      exp: '代入 <span class="math-expr">x = 4</span>：<span class="math-expr">2(4) + 3 = 8 + 3 = 11</span>。'
+    },
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr">(x<sup>2</sup>)<sup>3</sup></span>',
+      options: [
+        '<span class="math-expr">x<sup>6</sup></span>',
+        '<span class="math-expr">x<sup>5</sup></span>',
+        '<span class="math-expr">x<sup>8</sup></span>',
+        '<span class="math-expr">3x<sup>2</sup></span>'
+      ],
+      ans: 0,
+      exp: '冪的乘方，指數相乘：<span class="math-expr">x<sup>2&times;3</sup> = x<sup>6</sup></span>。'
+    },
+    // Original Basic Questions
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr">2a<sup>6</sup> &times; 8a<sup>14</sup></span>',
+      options: [
+        '<span class="math-expr">16a<sup>20</sup></span>',
+        '<span class="math-expr">10a<sup>20</sup></span>',
+        '<span class="math-expr">16a<sup>84</sup></span>',
+        '<span class="math-expr">10a<sup>84</sup></span>'
+      ],
+      ans: 0,
+      exp: '係數相乘：<span class="math-expr">2 &times; 8 = 16</span>；同底數相乘指數相加：<span class="math-expr">a<sup>6+14</sup> = a<sup>20</sup></span>。'
+    },
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr">3b<sup>4</sup> &times; 6b<sup>9</sup></span>',
+      options: [
+        '<span class="math-expr">18b<sup>13</sup></span>',
+        '<span class="math-expr">9b<sup>13</sup></span>',
+        '<span class="math-expr">18b<sup>36</sup></span>',
+        '<span class="math-expr">9b<sup>36</sup></span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">3 &times; 6 = 18</span>，同底數相乘指數相加：<span class="math-expr">b<sup>4+9</sup> = b<sup>13</sup></span>。'
+    },
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr">5x<sup>7</sup> &times; 4x<sup>8</sup></span>',
+      options: [
+        '<span class="math-expr">20x<sup>15</sup></span>',
+        '<span class="math-expr">9x<sup>15</sup></span>',
+        '<span class="math-expr">20x<sup>56</sup></span>',
+        '<span class="math-expr">9x<sup>56</sup></span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">5 &times; 4 = 20</span>，指數相加 <span class="math-expr">7 + 8 = 15</span>，得 <span class="math-expr">20x<sup>15</sup></span>。'
+    },
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr">(2x<sup>3</sup>)<sup>4</sup></span>',
+      options: [
+        '<span class="math-expr">16x<sup>12</sup></span>',
+        '<span class="math-expr">8x<sup>12</sup></span>',
+        '<span class="math-expr">16x<sup>7</sup></span>',
+        '<span class="math-expr">2x<sup>12</sup></span>'
+      ],
+      ans: 0,
+      exp: '積的冪：<span class="math-expr">2<sup>4</sup> &times; (x<sup>3</sup>)<sup>4</sup> = 16x<sup>3&times;4</sup> = 16x<sup>12</sup></span>。'
+    },
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">18y<sup>10</sup></span><span class="den">6y<sup>3</sup></span></span></span>',
+      options: [
+        '<span class="math-expr">3y<sup>7</sup></span>',
+        '<span class="math-expr">12y<sup>7</sup></span>',
+        '<span class="math-expr">3y<sup>13</sup></span>',
+        '<span class="math-expr">3y<sup>30</sup></span>'
+      ],
+      ans: 0,
+      exp: '係數相除 <span class="math-expr">18 &divide; 6 = 3</span>；同底數相除指數相減 <span class="math-expr">y<sup>10-3</sup> = y<sup>7</sup></span>。'
+    },
+    // 2. Polynomials & Common Factor (Basic)
+    {
+      topic: '多項式與因式分解',
+      q: '展開並化簡：<span class="math-expr">3(2x - 5) + 4(x + 2)</span>',
+      options: [
+        '<span class="math-expr">10x - 7</span>',
+        '<span class="math-expr">10x - 23</span>',
+        '<span class="math-expr">10x - 3</span>',
+        '<span class="math-expr">6x - 7</span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">(6x - 15) + (4x + 8) = (6x + 4x) + (-15 + 8) = 10x - 7</span>。'
+    },
+    {
+      topic: '多項式與因式分解',
+      q: '因式分解：<span class="math-expr">12x<sup>2</sup>y - 18xy<sup>2</sup></span>',
+      options: [
+        '<span class="math-expr">6xy(2x - 3y)</span>',
+        '<span class="math-expr">6x<sup>2</sup>y<sup>2</sup>(2 - 3)</span>',
+        '<span class="math-expr">3xy(4x - 6y)</span>',
+        '<span class="math-expr">6xy(2x + 3y)</span>'
+      ],
+      ans: 0,
+      exp: '最大公因式為 <span class="math-expr">6xy</span>，提取後得 <span class="math-expr">6xy(2x - 3y)</span>。'
+    },
+    {
+      topic: '多項式與因式分解',
+      q: '因式分解：<span class="math-expr">ab + b + 3a + 3</span>',
+      options: [
+        '<span class="math-expr">(a + 1)(b + 3)</span>',
+        '<span class="math-expr">(a + 3)(b + 1)</span>',
+        '<span class="math-expr">(a - 1)(b + 3)</span>',
+        '<span class="math-expr">b(a + 1) + 3</span>'
+      ],
+      ans: 0,
+      exp: '併項法：<span class="math-expr">b(a + 1) + 3(a + 1) = (a + 1)(b + 3)</span>。'
+    },
+    // 3. Identities (Basic)
+    {
+      topic: '代數恆等式',
+      q: '展開：<span class="math-expr">(x + 7)(x - 7)</span>',
+      options: [
+        '<span class="math-expr">x<sup>2</sup> - 49</span>',
+        '<span class="math-expr">x<sup>2</sup> + 49</span>',
+        '<span class="math-expr">x<sup>2</sup> - 14x + 49</span>',
+        '<span class="math-expr">x<sup>2</sup> - 14</span>'
+      ],
+      ans: 0,
+      exp: '利用平方差公式 <span class="math-expr">(a + b)(a - b) = a<sup>2</sup> - b<sup>2</sup></span>，得 <span class="math-expr">x<sup>2</sup> - 7<sup>2</sup> = x<sup>2</sup> - 49</span>。'
+    },
+    {
+      topic: '代數恆等式',
+      q: '展開：<span class="math-expr">(x + 5)<sup>2</sup></span>',
+      options: [
+        '<span class="math-expr">x<sup>2</sup> + 10x + 25</span>',
+        '<span class="math-expr">x<sup>2</sup> + 25</span>',
+        '<span class="math-expr">x<sup>2</sup> + 5x + 25</span>',
+        '<span class="math-expr">x<sup>2</sup> - 10x + 25</span>'
+      ],
+      ans: 0,
+      exp: '完全平方公式 <span class="math-expr">(a + b)<sup>2</sup> = a<sup>2</sup> + 2ab + b<sup>2</sup> = x<sup>2</sup> + 2(x)(5) + 5<sup>2</sup> = x<sup>2</sup> + 10x + 25</span>。'
+    },
+    {
+      topic: '代數恆等式',
+      q: '因式分解：<span class="math-expr">9m<sup>2</sup> - 16</span>',
+      options: [
+        '<span class="math-expr">(3m + 4)(3m - 4)</span>',
+        '<span class="math-expr">(9m + 4)(9m - 4)</span>',
+        '<span class="math-expr">(3m - 4)<sup>2</sup></span>',
+        '<span class="math-expr">(3m + 16)(3m - 1)</span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">9m<sup>2</sup> - 16 = (3m)<sup>2</sup> - 4<sup>2</sup> = (3m + 4)(3m - 4)</span>。'
+    },
+    // 4. Algebraic Fractions & Formulae (Basic)
+    {
+      topic: '代數分式',
+      q: '約簡：<span class="math-expr"><span class="frac"><span class="num">4x<sup>2</sup>y</span><span class="den">12xy<sup>3</sup></span></span></span>',
+      options: [
+        '<span class="math-expr"><span class="frac"><span class="num">x</span><span class="den">3y<sup>2</sup></span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">x<sup>2</sup></span><span class="den">3y<sup>2</sup></span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">3xy<sup>2</sup></span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">3x</span><span class="den">y<sup>2</sup></span></span></span>'
+      ],
+      ans: 0,
+      exp: '分子分母同除以公因式 <span class="math-expr">4xy</span>，得 <span class="math-expr"><span class="frac"><span class="num">x</span><span class="den">3y<sup>2</sup></span></span></span>。'
+    },
+    {
+      topic: '公式與主項變換',
+      q: '把公式 <span class="math-expr">v = u + at</span> 的主項變換為 <span class="math-expr">a</span>。',
+      options: [
+        '<span class="math-expr">a = <span class="frac"><span class="num">v - u</span><span class="den">t</span></span></span>',
+        '<span class="math-expr">a = <span class="frac"><span class="num">u - v</span><span class="den">t</span></span></span>',
+        '<span class="math-expr">a = v - u - t</span>',
+        '<span class="math-expr">a = <span class="frac"><span class="num">v + u</span><span class="den">t</span></span></span>'
+      ],
+      ans: 0,
+      exp: '移項得 <span class="math-expr">v - u = at</span>，兩邊同除以 <span class="math-expr">t</span> 得 <span class="math-expr">a = <span class="frac"><span class="num">v - u</span><span class="den">t</span></span></span>。'
+    },
+    {
+      topic: '公式與主項變換',
+      q: '已知公式 <span class="math-expr">P = 2(l + w)</span>。若 <span class="math-expr">l = 8</span> 及 <span class="math-expr">w = 5</span>，求 <span class="math-expr">P</span> 的值。',
+      options: ['26', '13', '80', '21'],
+      ans: 0,
+      exp: '代入數值：<span class="math-expr">P = 2(8 + 5) = 2 &times; 13 = 26</span>。'
+    }
+  ],
+
+  extended: [
+    // 1. Indices (Extended)
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">(3a<sup>2</sup>b)<sup>3</sup></span><span class="den">9a<sup>4</sup>b<sup>2</sup></span></span></span>',
+      options: [
+        '<span class="math-expr">3a<sup>2</sup>b</span>',
+        '<span class="math-expr">a<sup>2</sup>b</span>',
+        '<span class="math-expr">3a<sup>6</sup>b</span>',
+        '<span class="math-expr">9a<sup>2</sup>b</span>'
+      ],
+      ans: 0,
+      exp: '分子展開為 <span class="math-expr">27a<sup>6</sup>b<sup>3</sup></span>；再除以 <span class="math-expr">9a<sup>4</sup>b<sup>2</sup></span> 得 <span class="math-expr">3a<sup>6-4</sup>b<sup>3-2</sup> = 3a<sup>2</sup>b</span>。'
+    },
+    {
+      topic: '正整數指數律',
+      q: '化簡：<span class="math-expr">(-2x<sup>3</sup>y<sup>2</sup>)<sup>3</sup> &times; 3xy<sup>4</sup></span>',
+      options: [
+        '<span class="math-expr">-24x<sup>10</sup>y<sup>10</sup></span>',
+        '<span class="math-expr">24x<sup>10</sup>y<sup>10</sup></span>',
+        '<span class="math-expr">-6x<sup>10</sup>y<sup>10</sup></span>',
+        '<span class="math-expr">-24x<sup>7</sup>y<sup>9</sup></span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">(-2)<sup>3</sup>x<sup>9</sup>y<sup>6</sup> &times; 3xy<sup>4</sup> = -8 &times; 3 &times; x<sup>10</sup>y<sup>10</sup> = -24x<sup>10</sup>y<sup>10</sup></span>。'
+    },
+    // 2. Grouping & Sign Flip Factorization (Extended)
+    {
+      topic: '多項式因式分解',
+      q: '因式分解：<span class="math-expr">3x(5m - 1) + 4(1 - 5m)</span>',
+      options: [
+        '<span class="math-expr">(5m - 1)(3x - 4)</span>',
+        '<span class="math-expr">(5m - 1)(3x + 4)</span>',
+        '<span class="math-expr">(1 - 5m)(3x + 4)</span>',
+        '<span class="math-expr">(5m + 1)(3x - 4)</span>'
+      ],
+      ans: 0,
+      exp: '利用變號技巧 <span class="math-expr">(1 - 5m) = -(5m - 1)</span>，原式變為 <span class="math-expr">3x(5m - 1) - 4(5m - 1) = (5m - 1)(3x - 4)</span>。'
+    },
+    {
+      topic: '多項式因式分解',
+      q: '因式分解：<span class="math-expr">ax - ay - bx + by</span>',
+      options: [
+        '<span class="math-expr">(x - y)(a - b)</span>',
+        '<span class="math-expr">(x - y)(a + b)</span>',
+        '<span class="math-expr">(x + y)(a - b)</span>',
+        '<span class="math-expr">(a - y)(x - b)</span>'
+      ],
+      ans: 0,
+      exp: '併項提取負號：<span class="math-expr">a(x - y) - b(x - y) = (x - y)(a - b)</span>。'
+    },
+    {
+      topic: '多項式因式分解',
+      q: '因式分解：<span class="math-expr">2x<sup>2</sup> - 18y<sup>2</sup></span>',
+      options: [
+        '<span class="math-expr">2(x + 3y)(x - 3y)</span>',
+        '<span class="math-expr">2(x - 3y)<sup>2</sup></span>',
+        '<span class="math-expr">(2x + 6y)(x - 3y)</span>',
+        '<span class="math-expr">2(x + 9y)(x - 9y)</span>'
+      ],
+      ans: 0,
+      exp: '先提取公因式 2：<span class="math-expr">2(x<sup>2</sup> - 9y<sup>2</sup>)</span>，再用平方差公式得 <span class="math-expr">2(x + 3y)(x - 3y)</span>。'
+    },
+    // 3. Identities (Extended)
+    {
+      topic: '代數恆等式',
+      q: '展開：<span class="math-expr">(3a - 4b)<sup>2</sup></span>',
+      options: [
+        '<span class="math-expr">9a<sup>2</sup> - 24ab + 16b<sup>2</sup></span>',
+        '<span class="math-expr">9a<sup>2</sup> - 12ab + 16b<sup>2</sup></span>',
+        '<span class="math-expr">9a<sup>2</sup> - 16b<sup>2</sup></span>',
+        '<span class="math-expr">9a<sup>2</sup> + 24ab + 16b<sup>2</sup></span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">(3a)<sup>2</sup> - 2(3a)(4b) + (4b)<sup>2</sup> = 9a<sup>2</sup> - 24ab + 16b<sup>2</sup></span>。'
+    },
+    {
+      topic: '代數恆等式',
+      q: '若 <span class="math-expr">(x + 3)(x + k) &equiv; x<sup>2</sup> - 2x - 15</span>，求常數 <span class="math-expr">k</span> 的值。',
+      options: ['-5', '5', '-18', '1'],
+      ans: 0,
+      exp: '左邊展開為 <span class="math-expr">x<sup>2</sup> + (3 + k)x + 3k</span>。比較常數項 <span class="math-expr">3k = -15</span>，故 <span class="math-expr">k = -5</span>。'
+    },
+    {
+      topic: '代數恆等式',
+      q: '不用計算機，利用恆等式求 <span class="math-expr">103<sup>2</sup> - 97<sup>2</sup></span> 的值。',
+      options: ['1200', '600', '36', '200'],
+      ans: 0,
+      exp: '利用平方差公式：<span class="math-expr">(103 + 97)(103 - 97) = 200 &times; 6 = 1200</span>。'
+    },
+    {
+      topic: '代數恆等式',
+      q: '因式分解：<span class="math-expr">25x<sup>2</sup> + 20x + 4</span>',
+      options: [
+        '<span class="math-expr">(5x + 2)<sup>2</sup></span>',
+        '<span class="math-expr">(5x - 2)<sup>2</sup></span>',
+        '<span class="math-expr">(25x + 2)(x + 2)</span>',
+        '<span class="math-expr">(5x + 4)(5x + 1)</span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">(5x)<sup>2</sup> + 2(5x)(2) + 2<sup>2</sup> = (5x + 2)<sup>2</sup></span>。'
+    },
+    // 4. Algebraic Fractions (Extended)
+    {
+      topic: '代數分式',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">x<sup>2</sup> - 9</span><span class="den">x<sup>2</sup> + 3x</span></span></span>',
+      options: [
+        '<span class="math-expr"><span class="frac"><span class="num">x - 3</span><span class="den">x</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">-3</span><span class="den">x</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">x + 3</span><span class="den">x</span></span></span>',
+        '<span class="math-expr">-3</span>'
+      ],
+      ans: 0,
+      exp: '分子分解為 <span class="math-expr">(x + 3)(x - 3)</span>，分母分解為 <span class="math-expr">x(x + 3)</span>，約去 <span class="math-expr">(x + 3)</span> 得 <span class="math-expr"><span class="frac"><span class="num">x - 3</span><span class="den">x</span></span></span>。'
+    },
+    {
+      topic: '代數分式',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">2</span><span class="den">x - 1</span></span> + <span class="frac"><span class="num">3</span><span class="den">x + 1</span></span></span>',
+      options: [
+        '<span class="math-expr"><span class="frac"><span class="num">5x - 1</span><span class="den">(x - 1)(x + 1)</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">5x + 1</span><span class="den">(x - 1)(x + 1)</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">5</span><span class="den">2x</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">5x + 5</span><span class="den">x<sup>2</sup> - 1</span></span></span>'
+      ],
+      ans: 0,
+      exp: '通分得 <span class="math-expr"><span class="frac"><span class="num">2(x + 1) + 3(x - 1)</span><span class="den">(x - 1)(x + 1)</span></span> = <span class="frac"><span class="num">2x + 2 + 3x - 3</span><span class="den">(x - 1)(x + 1)</span></span> = <span class="frac"><span class="num">5x - 1</span><span class="den">(x - 1)(x + 1)</span></span></span>。'
+    },
+    // 5. Change of Subject (Extended)
+    {
+      topic: '公式與主項變換',
+      q: '把公式 <span class="math-expr">A = <span class="frac"><span class="num">1</span><span class="den">2</span></span>(a + b)h</span> 的主項變換為 <span class="math-expr">b</span>。',
+      options: [
+        '<span class="math-expr">b = <span class="frac"><span class="num">2A</span><span class="den">h</span></span> - a</span>',
+        '<span class="math-expr">b = <span class="frac"><span class="num">2A - a</span><span class="den">h</span></span></span>',
+        '<span class="math-expr">b = <span class="frac"><span class="num">A</span><span class="den">2h</span></span> - a</span>',
+        '<span class="math-expr">b = 2Ah - a</span>'
+      ],
+      ans: 0,
+      exp: '兩邊乘 2：<span class="math-expr">2A = (a + b)h</span>；除以 <span class="math-expr">h</span>：<span class="math-expr"><span class="frac"><span class="num">2A</span><span class="den">h</span></span> = a + b</span>；移項得 <span class="math-expr">b = <span class="frac"><span class="num">2A</span><span class="den">h</span></span> - a</span>。'
+    },
+    {
+      topic: '公式與主項變換',
+      q: '把公式 <span class="math-expr">y = <span class="frac"><span class="num">3x - 4</span><span class="den">2</span></span></span> 的主項變換為 <span class="math-expr">x</span>。',
+      options: [
+        '<span class="math-expr">x = <span class="frac"><span class="num">2y + 4</span><span class="den">3</span></span></span>',
+        '<span class="math-expr">x = <span class="frac"><span class="num">2y - 4</span><span class="den">3</span></span></span>',
+        '<span class="math-expr">x = <span class="frac"><span class="num">y + 4</span><span class="den">6</span></span></span>',
+        '<span class="math-expr">x = 2y + 4</span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">2y = 3x - 4 &rArr; 3x = 2y + 4 &rArr; x = <span class="frac"><span class="num">2y + 4</span><span class="den">3</span></span></span>。'
+    },
+    {
+      topic: '公式與主項變換',
+      q: '把公式 <span class="math-expr">S = 2&pi;r<sup>2</sup> + 2&pi;rh</span> 的主項變換為 <span class="math-expr">h</span>。',
+      options: [
+        '<span class="math-expr">h = <span class="frac"><span class="num">S - 2&pi;r<sup>2</sup></span><span class="den">2&pi;r</span></span></span>',
+        '<span class="math-expr">h = S - r</span>',
+        '<span class="math-expr">h = <span class="frac"><span class="num">S</span><span class="den">2&pi;r</span></span> - 2&pi;r<sup>2</sup></span>',
+        '<span class="math-expr">h = <span class="frac"><span class="num">S + 2&pi;r<sup>2</sup></span><span class="den">2&pi;r</span></span></span>'
+      ],
+      ans: 0,
+      exp: '移項得 <span class="math-expr">2&pi;rh = S - 2&pi;r<sup>2</sup></span>，兩邊同除以 <span class="math-expr">2&pi;r</span> 得 <span class="math-expr">h = <span class="frac"><span class="num">S - 2&pi;r<sup>2</sup></span><span class="den">2&pi;r</span></span></span>。'
+    },
+    {
+      topic: '代數恆等式',
+      q: '展開並化簡：<span class="math-expr">(2x + 3)(2x - 3) + 9</span>',
+      options: [
+        '<span class="math-expr">4x<sup>2</sup></span>',
+        '<span class="math-expr">4x<sup>2</sup> - 18</span>',
+        '<span class="math-expr">2x<sup>2</sup></span>',
+        '<span class="math-expr">4x<sup>2</sup> + 18</span>'
+      ],
+      ans: 0,
+      exp: '利用平方差公式：<span class="math-expr">(4x<sup>2</sup> - 9) + 9 = 4x<sup>2</sup></span>。'
+    },
+    {
+      topic: '代數分式',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">4a<sup>2</sup> - b<sup>2</sup></span><span class="den">2a - b</span></span></span>',
+      options: [
+        '<span class="math-expr">2a + b</span>',
+        '<span class="math-expr">2a - b</span>',
+        '<span class="math-expr">2a + b<sup>2</sup></span>',
+        '<span class="math-expr">4a + b</span>'
+      ],
+      ans: 0,
+      exp: '分子分解為 <span class="math-expr">(2a + b)(2a - b)</span>，約去 <span class="math-expr">(2a - b)</span> 得 <span class="math-expr">2a + b</span>。'
+    },
+    {
+      topic: '多項式因式分解',
+      q: '因式分解：<span class="math-expr">3x<sup>2</sup> - 12x + 12</span>',
+      options: [
+        '<span class="math-expr">3(x - 2)<sup>2</sup></span>',
+        '<span class="math-expr">3(x + 2)<sup>2</sup></span>',
+        '<span class="math-expr">3(x<sup>2</sup> - 4)</span>',
+        '<span class="math-expr">(3x - 6)(x - 2)</span>'
+      ],
+      ans: 0,
+      exp: '先提取 3 得 <span class="math-expr">3(x<sup>2</sup> - 4x + 4) = 3(x - 2)<sup>2</sup></span>。'
+    },
+    {
+      topic: '公式與主項變換',
+      q: '把公式 <span class="math-expr">T = 2&pi;<span class="frac"><span class="num">L</span><span class="den">g</span></span></span> 的主項變換為 <span class="math-expr">L</span>。',
+      options: [
+        '<span class="math-expr">L = <span class="frac"><span class="num">gT</span><span class="den">2&pi;</span></span></span>',
+        '<span class="math-expr">L = <span class="frac"><span class="num">2&pi;T</span><span class="den">g</span></span></span>',
+        '<span class="math-expr">L = <span class="frac"><span class="num">T</span><span class="den">2&pi;g</span></span></span>',
+        '<span class="math-expr">L = gT - 2&pi;</span>'
+      ],
+      ans: 0,
+      exp: '兩邊同乘 <span class="math-expr">g</span> 得 <span class="math-expr">gT = 2&pi;L</span>，再除以 <span class="math-expr">2&pi;</span> 得 <span class="math-expr">L = <span class="frac"><span class="num">gT</span><span class="den">2&pi;</span></span></span>。'
+    }
+  ],
+
+  challenge: [
+    // 1. Challenge Indices
+    {
+      topic: '進階指數律',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">4<sup>n+1</sup> &times; 8<sup>n</sup></span><span class="den">2<sup>5n-1</sup></span></span></span>',
+      options: ['8', '4', '2', '16'],
+      ans: 0,
+      exp: '全化為底數 2：<span class="math-expr"><span class="frac"><span class="num">(2<sup>2</sup>)<sup>n+1</sup> &times; (2<sup>3</sup>)<sup>n</sup></span><span class="den">2<sup>5n-1</sup></span></span> = <span class="frac"><span class="num">2<sup>2n+2+3n</sup></span><span class="den">2<sup>5n-1</sup></span></span> = 2<sup>(5n+2)-(5n-1)</sup> = 2<sup>3</sup> = 8</span>。'
+    },
+    {
+      topic: '進階指數律',
+      q: '若 <span class="math-expr">3<sup>x</sup> = a</span> 及 <span class="math-expr">3<sup>y</sup> = b</span>，以 <span class="math-expr">a</span> 和 <span class="math-expr">b</span> 表示 <span class="math-expr">27<sup>x</sup> &times; 9<sup>y</sup></span>。',
+      options: [
+        '<span class="math-expr">a<sup>3</sup>b<sup>2</sup></span>',
+        '<span class="math-expr">3a + 2b</span>',
+        '<span class="math-expr">9ab</span>',
+        '<span class="math-expr">a<sup>2</sup>b<sup>3</sup></span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">27<sup>x</sup> &times; 9<sup>y</sup> = (3<sup>3</sup>)<sup>x</sup> &times; (3<sup>2</sup>)<sup>y</sup> = (3<sup>x</sup>)<sup>3</sup> &times; (3<sup>y</sup>)<sup>2</sup> = a<sup>3</sup>b<sup>2</sup></span>。'
+    },
+    // 2. Challenge Factorization
+    {
+      topic: '進階因式分解',
+      q: '因式分解：<span class="math-expr">x<sup>2</sup> - y<sup>2</sup> - 4x + 4y</span>',
+      options: [
+        '<span class="math-expr">(x - y)(x + y - 4)</span>',
+        '<span class="math-expr">(x + y)(x - y - 4)</span>',
+        '<span class="math-expr">(x - y)(x - y - 4)</span>',
+        '<span class="math-expr">(x - y + 4)(x + y)</span>'
+      ],
+      ans: 0,
+      exp: '分組：<span class="math-expr">(x<sup>2</sup> - y<sup>2</sup>) - 4(x - y) = (x + y)(x - y) - 4(x - y) = (x - y)(x + y - 4)</span>。'
+    },
+    {
+      topic: '進階因式分解',
+      q: '因式分解：<span class="math-expr">a<sup>2</sup> - b<sup>2</sup> + 2bc - c<sup>2</sup></span>',
+      options: [
+        '<span class="math-expr">(a + b - c)(a - b + c)</span>',
+        '<span class="math-expr">(a + b + c)(a - b - c)</span>',
+        '<span class="math-expr">(a - b - c)<sup>2</sup></span>',
+        '<span class="math-expr">(a + b - c)(a - b - c)</span>'
+      ],
+      ans: 0,
+      exp: '後三項配成完全平方：<span class="math-expr">a<sup>2</sup> - (b<sup>2</sup> - 2bc + c<sup>2</sup>) = a<sup>2</sup> - (b - c)<sup>2</sup> = (a + b - c)(a - b + c)</span>。'
+    },
+    {
+      topic: '進階因式分解',
+      q: '因式分解：<span class="math-expr">16x<sup>4</sup> - 81y<sup>4</sup></span>',
+      options: [
+        '<span class="math-expr">(4x<sup>2</sup> + 9y<sup>2</sup>)(2x + 3y)(2x - 3y)</span>',
+        '<span class="math-expr">(4x<sup>2</sup> + 9y<sup>2</sup>)(4x<sup>2</sup> - 9y<sup>2</sup>)</span>',
+        '<span class="math-expr">(2x + 3y)<sup>2</sup>(2x - 3y)<sup>2</sup></span>',
+        '<span class="math-expr">(2x - 3y)<sup>4</sup></span>'
+      ],
+      ans: 0,
+      exp: '兩次使用平方差：<span class="math-expr">(4x<sup>2</sup> + 9y<sup>2</sup>)(4x<sup>2</sup> - 9y<sup>2</sup>) = (4x<sup>2</sup> + 9y<sup>2</sup>)(2x + 3y)(2x - 3y)</span>（須分解至最簡）。'
+    },
+    // 3. Challenge Identities
+    {
+      topic: '進階代數恆等式',
+      q: '若 <span class="math-expr">x - <span class="frac"><span class="num">1</span><span class="den">x</span></span> = 4</span>，求 <span class="math-expr">x<sup>2</sup> + <span class="frac"><span class="num">1</span><span class="den">x<sup>2</sup></span></span></span> 的值。',
+      options: ['18', '14', '16', '12'],
+      ans: 0,
+      exp: '兩邊平方：<span class="math-expr">(x - <span class="frac"><span class="num">1</span><span class="den">x</span></span>)<sup>2</sup> = x<sup>2</sup> - 2 + <span class="frac"><span class="num">1</span><span class="den">x<sup>2</sup></span></span> = 16 &rArr; x<sup>2</sup> + <span class="frac"><span class="num">1</span><span class="den">x<sup>2</sup></span></span> = 16 + 2 = 18</span>。'
+    },
+    {
+      topic: '進階代數恆等式',
+      q: '若 <span class="math-expr">A(x - 2) + B(x + 3) &equiv; 5x + 5</span>，求 <span class="math-expr">A</span> 和 <span class="math-expr">B</span> 的值。',
+      options: [
+        '<span class="math-expr">A = 2, B = 3</span>',
+        '<span class="math-expr">A = 3, B = 2</span>',
+        '<span class="math-expr">A = 1, B = 4</span>',
+        '<span class="math-expr">A = -2, B = 7</span>'
+      ],
+      ans: 0,
+      exp: '代數值法：代 <span class="math-expr">x = 2</span> 得 <span class="math-expr">5B = 15 &rArr; B = 3</span>；代 <span class="math-expr">x = -3</span> 得 <span class="math-expr">-5A = -10 &rArr; A = 2</span>。'
+    },
+    {
+      topic: '進階代數恆等式',
+      q: '若 <span class="math-expr">a + b = 7</span> 且 <span class="math-expr">ab = 10</span>，求 <span class="math-expr">a<sup>2</sup> + b<sup>2</sup></span> 的值。',
+      options: ['29', '49', '39', '69'],
+      ans: 0,
+      exp: '<span class="math-expr">a<sup>2</sup> + b<sup>2</sup> = (a + b)<sup>2</sup> - 2ab = 7<sup>2</sup> - 2(10) = 49 - 20 = 29</span>。'
+    },
+    // 4. Challenge Algebraic Fractions
+    {
+      topic: '進階代數分式',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">3</span><span class="den">x - 2</span></span> - <span class="frac"><span class="num">2</span><span class="den">2 - x</span></span></span>',
+      options: [
+        '<span class="math-expr"><span class="frac"><span class="num">5</span><span class="den">x - 2</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">x - 2</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">5</span><span class="den">(x - 2)(2 - x)</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">2 - x</span></span></span>'
+      ],
+      ans: 0,
+      exp: '注意 <span class="math-expr">2 - x = -(x - 2)</span>，故原式為 <span class="math-expr"><span class="frac"><span class="num">3</span><span class="den">x - 2</span></span> + <span class="frac"><span class="num">2</span><span class="den">x - 2</span></span> = <span class="frac"><span class="num">5</span><span class="den">x - 2</span></span></span>。'
+    },
+    {
+      topic: '進階代數分式',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">x<sup>2</sup> - 4y<sup>2</sup></span><span class="den">x + 2y</span></span> &divide; <span class="frac"><span class="num">x - 2y</span><span class="den">3x</span></span></span>',
+      options: [
+        '<span class="math-expr">3x</span>',
+        '<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">3x</span></span></span>',
+        '<span class="math-expr">3x(x - 2y)</span>',
+        '<span class="math-expr"><span class="frac"><span class="num">3x</span><span class="den">x + 2y</span></span></span>'
+      ],
+      ans: 0,
+      exp: '原式 <span class="math-expr">= <span class="frac"><span class="num">(x + 2y)(x - 2y)</span><span class="den">x + 2y</span></span> &times; <span class="frac"><span class="num">3x</span><span class="den">x - 2y</span></span> = 3x</span>。'
+    },
+    {
+      topic: '進階代數分式',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">2x</span><span class="den">x<sup>2</sup> - 1</span></span> - <span class="frac"><span class="num">1</span><span class="den">x - 1</span></span></span>',
+      options: [
+        '<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">x + 1</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">x - 1</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">x - 1</span><span class="den">x + 1</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">3x + 1</span><span class="den">x<sup>2</sup> - 1</span></span></span>'
+      ],
+      ans: 0,
+      exp: '通分：<span class="math-expr"><span class="frac"><span class="num">2x - (x + 1)</span><span class="den">(x + 1)(x - 1)</span></span> = <span class="frac"><span class="num">x - 1</span><span class="den">(x + 1)(x - 1)</span></span> = <span class="frac"><span class="num">1</span><span class="den">x + 1</span></span></span>。'
+    },
+    // 5. Challenge Change of Subject
+    {
+      topic: '進階主項變換',
+      q: '把公式 <span class="math-expr">y = <span class="frac"><span class="num">2x + 3</span><span class="den">x - 1</span></span></span> 的主項變換為 <span class="math-expr">x</span>。',
+      options: [
+        '<span class="math-expr">x = <span class="frac"><span class="num">y + 3</span><span class="den">y - 2</span></span></span>',
+        '<span class="math-expr">x = <span class="frac"><span class="num">y - 3</span><span class="den">y - 2</span></span></span>',
+        '<span class="math-expr">x = <span class="frac"><span class="num">3 - y</span><span class="den">y + 2</span></span></span>',
+        '<span class="math-expr">x = <span class="frac"><span class="num">y + 3</span><span class="den">2 - y</span></span></span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">y(x - 1) = 2x + 3 &rArr; xy - y = 2x + 3 &rArr; x(y - 2) = y + 3 &rArr; x = <span class="frac"><span class="num">y + 3</span><span class="den">y - 2</span></span></span>。'
+    },
+    {
+      topic: '進階主項變換',
+      q: '把公式 <span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">f</span></span> = <span class="frac"><span class="num">1</span><span class="den">u</span></span> + <span class="frac"><span class="num">1</span><span class="den">v</span></span></span> 的主項變換為 <span class="math-expr">v</span>。',
+      options: [
+        '<span class="math-expr">v = <span class="frac"><span class="num">fu</span><span class="den">u - f</span></span></span>',
+        '<span class="math-expr">v = <span class="frac"><span class="num">fu</span><span class="den">f - u</span></span></span>',
+        '<span class="math-expr">v = f - u</span>',
+        '<span class="math-expr">v = <span class="frac"><span class="num">u - f</span><span class="den">fu</span></span></span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">v</span></span> = <span class="frac"><span class="num">1</span><span class="den">f</span></span> - <span class="frac"><span class="num">1</span><span class="den">u</span></span> = <span class="frac"><span class="num">u - f</span><span class="den">fu</span></span></span>，兩邊取倒數得 <span class="math-expr">v = <span class="frac"><span class="num">fu</span><span class="den">u - f</span></span></span>。'
+    },
+    {
+      topic: '進階主項變換',
+      q: '已知 <span class="math-expr">k = <span class="frac"><span class="num">3m - n</span><span class="den">m + 2n</span></span></span>，把 <span class="math-expr">m</span> 設為公式的主項。',
+      options: [
+        '<span class="math-expr">m = <span class="frac"><span class="num">n(2k + 1)</span><span class="den">3 - k</span></span></span>',
+        '<span class="math-expr">m = <span class="frac"><span class="num">n(2k - 1)</span><span class="den">3 - k</span></span></span>',
+        '<span class="math-expr">m = <span class="frac"><span class="num">n(2k + 1)</span><span class="den">k - 3</span></span></span>',
+        '<span class="math-expr">m = <span class="frac"><span class="num">2kn + n</span><span class="den">3 + k</span></span></span>'
+      ],
+      ans: 0,
+      exp: '<span class="math-expr">km + 2kn = 3m - n &rArr; 2kn + n = 3m - km &rArr; n(2k + 1) = m(3 - k) &rArr; m = <span class="frac"><span class="num">n(2k + 1)</span><span class="den">3 - k</span></span></span>。'
+    },
+    {
+      topic: '進階代數恆等式',
+      q: '若 <span class="math-expr">x + <span class="frac"><span class="num">1</span><span class="den">x</span></span> = 5</span>，求 <span class="math-expr">x<sup>2</sup> + <span class="frac"><span class="num">1</span><span class="den">x<sup>2</sup></span></span></span> 的值。',
+      options: ['23', '25', '27', '21'],
+      ans: 0,
+      exp: '<span class="math-expr">(x + <span class="frac"><span class="num">1</span><span class="den">x</span></span>)<sup>2</sup> = x<sup>2</sup> + 2 + <span class="frac"><span class="num">1</span><span class="den">x<sup>2</sup></span></span> = 25 &rArr; x<sup>2</sup> + <span class="frac"><span class="num">1</span><span class="den">x<sup>2</sup></span></span> = 25 - 2 = 23</span>。'
+    },
+    {
+      topic: '進階因式分解',
+      q: '因式分解：<span class="math-expr">x<sup>3</sup> - 4x<sup>2</sup> - 9x + 36</span>',
+      options: [
+        '<span class="math-expr">(x - 4)(x + 3)(x - 3)</span>',
+        '<span class="math-expr">(x + 4)(x + 3)(x - 3)</span>',
+        '<span class="math-expr">(x - 4)(x<sup>2</sup> + 9)</span>',
+        '<span class="math-expr">(x - 4)(x - 3)<sup>2</sup></span>'
+      ],
+      ans: 0,
+      exp: '分組：<span class="math-expr">x<sup>2</sup>(x - 4) - 9(x - 4) = (x - 4)(x<sup>2</sup> - 9) = (x - 4)(x + 3)(x - 3)</span>。'
+    },
+    {
+      topic: '進階指數律',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">9<sup>n+1</sup> - 3<sup>2n</sup></span><span class="den">3<sup>2n</sup></span></span></span>',
+      options: ['8', '9', '3', '2'],
+      ans: 0,
+      exp: '<span class="math-expr">9<sup>n+1</sup> = (3<sup>2</sup>)<sup>n+1</sup> = 3<sup>2n+2</sup> = 9 &times; 3<sup>2n</sup></span>，故分子為 <span class="math-expr">8 &times; 3<sup>2n</sup></span>，約簡得 <span class="math-expr">8</span>。'
+    },
+    {
+      topic: '進階代數分式',
+      q: '化簡：<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">x(x + 1)</span></span> + <span class="frac"><span class="num">1</span><span class="den">(x + 1)(x + 2)</span></span></span>',
+      options: [
+        '<span class="math-expr"><span class="frac"><span class="num">2</span><span class="den">x(x + 2)</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">2</span><span class="den">x(x + 1)(x + 2)</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">2x + 2</span><span class="den">x(x + 2)</span></span></span>',
+        '<span class="math-expr"><span class="frac"><span class="num">1</span><span class="den">x(x + 2)</span></span></span>'
+      ],
+      ans: 0,
+      exp: '通分：<span class="math-expr"><span class="frac"><span class="num">(x + 2) + x</span><span class="den">x(x + 1)(x + 2)</span></span> = <span class="frac"><span class="num">2(x + 1)</span><span class="den">x(x + 1)(x + 2)</span></span> = <span class="frac"><span class="num">2</span><span class="den">x(x + 2)</span></span></span>。'
+    }
+  ]
+};
+
+// Difficulty-scaled skill multiplier & effect definitions
+const DIFF_EFFECTS = {
+  basic: {
+    label: '🌱 基礎級',
+    powerMult: 2.2,
+    powerAtkBuff: 6,
+    powerRage: 25,
+    shieldBlock: 0.65,
+    shieldReflect: 0.15,
+    healPct: 0.28,
+    reviveHpPct: 0.70,
+    chestMult: 1.8,
+    previews: {
+      power: '220% 暴擊 +6%攻',
+      shield: '65% 減傷 +15%反彈',
+      heal: '回復 28% 生命',
+      revive: '原地復活 (70% 血量)',
+      chest: '寶箱獎勵 x1.8 倍'
+    }
+  },
+  extended: {
+    label: '⚡ 延展級',
+    powerMult: 3.0,
+    powerAtkBuff: 10,
+    powerRage: 35,
+    shieldBlock: 0.80,
+    shieldReflect: 0.30,
+    healPct: 0.38,
+    reviveHpPct: 1.0,
+    chestMult: 2.5,
+    previews: {
+      power: '300% 暴擊 +10%攻',
+      shield: '80% 減傷 +30%反彈',
+      heal: '回復 38% 生命',
+      revive: '滿血復活 (100% 血量)',
+      chest: '寶箱獎勵 x2.5 倍'
+    }
+  },
+  challenge: {
+    label: '🔥 挑戰級',
+    powerMult: 4.0,
+    powerAtkBuff: 16,
+    powerRage: 50,
+    shieldBlock: 0.95,
+    shieldReflect: 0.55,
+    healPct: 0.55,
+    reviveHpPct: 1.0,
+    chestMult: 3.5,
+    previews: {
+      power: '400% 毀滅暴擊 +16%攻',
+      shield: '95% 絕對防禦 +55%反彈',
+      heal: '回復 55% 生命 +20 MP',
+      revive: '滿血復活 + 滿怒氣！',
+      chest: '傳說寶箱獎勵 x3.5 倍'
+    }
+  }
+};
+
+/**
+ * ============================================================================
+ * 4. TURN-BASED GAME STATE MANAGEMENT
+ * ============================================================================
+ */
+const HERO_HOME_POS = new THREE.Vector3(-3.3, 0, 1.4);
+const ENEMY_HOME_POS = new THREE.Vector3(3.3, 0, -1.4);
+
+const state = {
+  hero: {
+    lvl: 1,
+    hp: 140,
+    maxHp: 140,
+    mp: 60,
+    maxMp: 100,
+    rage: 0, // 0 to 100
+    exp: 0,
+    nextExp: 100,
+    baseAtk: 20,
+    gold: 50,
+    ore: 1,
+    score: 0,
+    equippedWeapon: 0,
+    unlockedWeapons: [0],
+    weaponEnhanceLevels: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 },
+    battleAtkBonusPct: 0, // +10% per correct Power Strike in battle
+    shieldBlockPct: 0,    // e.g. 0.80 (80% block + 30% reflect) or 0.30 (30% block)
+    shieldReflectPct: 0
+  },
+  turn: {
+    number: 1,
+    phase: 'PLAYER_INPUT', // 'PLAYER_INPUT' | 'PLAYER_ANIM' | 'ENEMY_TURN' | 'VICTORY' | 'DEFEAT'
+    cameraFocus: 'NEUTRAL' // 'PLAYER' | 'ENEMY' | 'NEUTRAL'
+  },
+  difficulty: 'basic', // 'basic' | 'extended' | 'challenge'
+  stageIdx: 0,
+  enemy: {
+    hp: 150,
+    maxHp: 150,
+    atk: 16,
+    isDead: false,
+    intent: { type: 'bite', label: '⚔️ 準備普通撕咬', mult: 1.0 }
+  },
+  pendingRewards: {
+    score: 0,
+    exp: 0,
+    gold: 0,
+    ore: 0,
+    upgraded: false
+  },
+  activeMathContext: null, // { mode: 'power' | 'shield' | 'heal' | 'chest', qObj, isCorrect }
+  usedQuestionIndices: { basic: [], extended: [], challenge: [] }
+};
+
+function getTotalAtk() {
+  const wId = state.hero.equippedWeapon;
+  const wBonus = getWeaponTotalAtkBonus(wId);
+  const raw = state.hero.baseAtk + wBonus;
+  return Math.round(raw * (1 + state.hero.battleAtkBonusPct / 100));
+}
+
+function getWeaponEnhanceLevel(id) {
+  return state.hero.weaponEnhanceLevels?.[id] || 0;
+}
+
+function getWeaponTotalAtkBonus(id) {
+  const w = WEAPONS[id];
+  const enhLvl = getWeaponEnhanceLevel(id);
+  const perLvlGain = Math.max(4, Math.round(w.atkBonus * 0.25) + 4);
+  return w.atkBonus + enhLvl * perLvlGain;
+}
+
+function getWeaponEnhanceCost(id) {
+  const w = WEAPONS[id];
+  const enhLvl = getWeaponEnhanceLevel(id);
+  const gold = Math.round((45 + w.goldCost * 0.35) * Math.pow(1.45, enhLvl));
+  const ore = Math.max(1, Math.floor(1 + w.oreCost * 0.25 + enhLvl * 1.2));
+  return { gold, ore };
+}
+
+function getWeaponDisplayName(id) {
+  const w = WEAPONS[id];
+  const enhLvl = getWeaponEnhanceLevel(id);
+  return enhLvl > 0 ? `${w.name} +${enhLvl}` : w.name;
+}
+
+function rollEnemyIntent() {
+  const stage = STAGES[state.stageIdx];
+  const r = Math.random();
+  if (r < 0.48) {
+    const est = Math.round(stage.atk * 1.0);
+    state.enemy.intent = {
+      type: 'bite',
+      label: `⚔️ 普通撕咬 (約 ${est} 傷)`,
+      mult: 1.0
+    };
+  } else if (r < 0.80) {
+    const est = Math.round(stage.atk * 1.85);
+    state.enemy.intent = {
+      type: 'heavy',
+      label: `🔥 蓄力猛擊 (約 ${est} 傷！建議開盾)`,
+      mult: 1.85
+    };
+  } else {
+    const est = Math.round(stage.atk * 0.75);
+    state.enemy.intent = {
+      type: 'hex',
+      label: `🧪 代數干擾 (吸取 15 MP + ${est} 傷)`,
+      mult: 0.75
+    };
+  }
+}
+
+/**
+ * ============================================================================
+ * 5. THREE.JS 3D WORLD, TURN-BASED ARENA, HERO, WEAPONS, MONSTERS & VFX
+ * ============================================================================
+ */
+let scene, camera, renderer;
+let heroGroup, heroWeaponHolder, heroLeftArm, heroRightArm, heroLeftLeg, heroRightLeg, heroShieldMesh;
+let enemyGroup, enemyBodyMesh, enemyAuraMesh, chestMesh;
+let particles = [];
+let slashArcs = [];
+let swordRainMeshes = [];
+let enemyProjectiles = [];
+let cameraShakeTimer = 0;
+
+// Dynamic Turn-Based Camera Orbit & Focus
+let userCamYawOffset = 0;
+let userCamPitchOffset = 0;
+let isDraggingCam = false;
+let prevPointer = { x: 0, y: 0 };
+let currentCamPos = new THREE.Vector3(0, 7.5, 11.5);
+let currentLookAt = new THREE.Vector3(0, 1.3, 0);
+
+// Animation state variables
+let heroPos = HERO_HOME_POS.clone();
+let heroRotY = Math.atan2(ENEMY_HOME_POS.x - HERO_HOME_POS.x, ENEMY_HOME_POS.z - HERO_HOME_POS.z);
+let heroSwingAnim = 0;
+let enemyPos = ENEMY_HOME_POS.clone();
+let enemyRotY = Math.atan2(HERO_HOME_POS.x - ENEMY_HOME_POS.x, HERO_HOME_POS.z - ENEMY_HOME_POS.z);
+let enemyHitAnim = 0;
+let enemyLungeAnim = 0;
+let healBeamTimer = 0;
+let healBeamMesh = null;
+
+function initThreeJS() {
+  const canvas = document.getElementById('game-canvas');
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b1120);
+  scene.fog = new THREE.FogExp2(0x0b1120, 0.022);
+
+  camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 120);
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  // Lighting
+  const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x1e293b, 0.9);
+  scene.add(hemiLight);
+
+  const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.2);
+  dirLight.position.set(8, 18, 12);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 1024;
+  dirLight.shadow.mapSize.height = 1024;
+  dirLight.shadow.camera.near = 1;
+  dirLight.shadow.camera.far = 45;
+  const d = 14;
+  dirLight.shadow.camera.left = -d;
+  dirLight.shadow.camera.right = d;
+  dirLight.shadow.camera.top = d;
+  dirLight.shadow.camera.bottom = -d;
+  scene.add(dirLight);
+
+  // Arena Floor & Turn Pedestals
+  buildArenaEnvironment();
+
+  // Build Hero, Shield Dome & Initial Weapon
+  buildHeroCharacter();
+  updateHero3DWeapon();
+
+  // Spawn First Monster & Roll Intent
+  loadStage(0);
+
+  // Camera Drag Listeners
+  canvas.addEventListener('pointerdown', (e) => {
+    isDraggingCam = true;
+    prevPointer = { x: e.clientX, y: e.clientY };
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!isDraggingCam) return;
+    const dx = e.clientX - prevPointer.x;
+    const dy = e.clientY - prevPointer.y;
+    userCamYawOffset -= dx * 0.0065;
+    userCamPitchOffset = Math.max(-0.22, Math.min(0.45, userCamPitchOffset + dy * 0.005));
+    prevPointer = { x: e.clientX, y: e.clientY };
+  });
+  window.addEventListener('pointerup', () => {
+    isDraggingCam = false;
+  });
+
+  // Resize Handler
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+function resetCameraAngle() {
+  userCamYawOffset = 0;
+  userCamPitchOffset = 0;
+  showToast('🎥 已重置為標準戰術視角');
+}
+
+function buildArenaEnvironment() {
+  // Main Stone Platform
+  const platformGeo = new THREE.CylinderGeometry(11.5, 12.5, 1.2, 36);
+  const platformMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    roughness: 0.75,
+    metalness: 0.15
+  });
+  const platform = new THREE.Mesh(platformGeo, platformMat);
+  platform.position.y = -0.6;
+  platform.receiveShadow = true;
+  scene.add(platform);
+
+  // Outer Runic Ring
+  const ringGeo = new THREE.RingGeometry(7.6, 7.9, 48);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0x38bdf8,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.4
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.02;
+  scene.add(ring);
+
+  // Hero Turn-Based Pedestal Ring (Left-Near)
+  const heroPad = new THREE.Mesh(
+    new THREE.RingGeometry(1.2, 1.45, 32),
+    new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.65 })
+  );
+  heroPad.rotation.x = -Math.PI / 2;
+  heroPad.position.set(HERO_HOME_POS.x, 0.03, HERO_HOME_POS.z);
+  scene.add(heroPad);
+
+  // Enemy Turn-Based Pedestal Ring (Right-Far)
+  const enemyPad = new THREE.Mesh(
+    new THREE.RingGeometry(1.45, 1.75, 32),
+    new THREE.MeshBasicMaterial({ color: 0xf43f5e, side: THREE.DoubleSide, transparent: true, opacity: 0.65 })
+  );
+  enemyPad.rotation.x = -Math.PI / 2;
+  enemyPad.position.set(ENEMY_HOME_POS.x, 0.03, ENEMY_HOME_POS.z);
+  scene.add(enemyPad);
+
+  // Decorative Perimeter Pillars & Floating Crystals
+  const pillarGeo = new THREE.BoxGeometry(0.9, 3.6, 0.9);
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 });
+  const crystalGeo = new THREE.OctahedronGeometry(0.45, 0);
+  const crystalMat = new THREE.MeshStandardMaterial({
+    color: 0x38bdf8,
+    emissive: 0x0284c7,
+    emissiveIntensity: 0.7
+  });
+
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    const dist = 10.6;
+    const px = Math.cos(angle) * dist;
+    const pz = Math.sin(angle) * dist;
+
+    const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+    pillar.position.set(px, 1.8, pz);
+    pillar.castShadow = true;
+    pillar.receiveShadow = true;
+    scene.add(pillar);
+
+    const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+    crystal.position.set(px, 4.2, pz);
+    scene.add(crystal);
+  }
+}
+
+function buildHeroCharacter() {
+  heroGroup = new THREE.Group();
+
+  // Legs
+  const legGeo = new THREE.BoxGeometry(0.32, 0.75, 0.32);
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x1e3a8a });
+  heroLeftLeg = new THREE.Mesh(legGeo, legMat);
+  heroLeftLeg.position.set(-0.22, 0.375, 0);
+  heroLeftLeg.castShadow = true;
+  heroGroup.add(heroLeftLeg);
+
+  heroRightLeg = new THREE.Mesh(legGeo, legMat);
+  heroRightLeg.position.set(0.22, 0.375, 0);
+  heroRightLeg.castShadow = true;
+  heroGroup.add(heroRightLeg);
+
+  // Torso
+  const bodyGeo = new THREE.BoxGeometry(0.85, 0.95, 0.5);
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.4 });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = 1.2;
+  body.castShadow = true;
+  heroGroup.add(body);
+
+  // Golden-Trimmed Red Cape
+  const capeGeo = new THREE.BoxGeometry(0.75, 0.85, 0.12);
+  const capeMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+  const cape = new THREE.Mesh(capeGeo, capeMat);
+  cape.position.set(0, 1.2, -0.3);
+  cape.rotation.x = 0.15;
+  heroGroup.add(cape);
+
+  // Head
+  const headGeo = new THREE.BoxGeometry(0.68, 0.68, 0.68);
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xfde68a });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.position.y = 2.05;
+  head.castShadow = true;
+  heroGroup.add(head);
+
+  // Hair / Headband
+  const hairGeo = new THREE.BoxGeometry(0.74, 0.28, 0.74);
+  const hairMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+  const hair = new THREE.Mesh(hairGeo, hairMat);
+  hair.position.y = 2.32;
+  heroGroup.add(hair);
+
+  // Eyes
+  const eyeGeo = new THREE.BoxGeometry(0.1, 0.12, 0.05);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+  const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+  eyeL.position.set(-0.16, 2.04, 0.35);
+  const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+  eyeR.position.set(0.16, 2.04, 0.35);
+  heroGroup.add(eyeL, eyeR);
+
+  // Arms
+  const armGeo = new THREE.BoxGeometry(0.28, 0.75, 0.28);
+  const armMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+  heroLeftArm = new THREE.Mesh(armGeo, armMat);
+  heroLeftArm.position.set(-0.6, 1.25, 0);
+  heroLeftArm.castShadow = true;
+  heroGroup.add(heroLeftArm);
+
+  heroRightArm = new THREE.Group();
+  heroRightArm.position.set(0.6, 1.5, 0);
+  const rightArmMesh = new THREE.Mesh(armGeo, armMat);
+  rightArmMesh.position.y = -0.3;
+  rightArmMesh.castShadow = true;
+  heroRightArm.add(rightArmMesh);
+
+  // Weapon Anchor on Right Hand
+  heroWeaponHolder = new THREE.Group();
+  heroWeaponHolder.position.set(0, -0.62, 0.2);
+  heroWeaponHolder.rotation.x = Math.PI / 3;
+  heroRightArm.add(heroWeaponHolder);
+  heroGroup.add(heroRightArm);
+
+  // 3D Geometric Identity Shield Dome (Hidden unless Shield Active)
+  const shieldGeo = new THREE.IcosahedronGeometry(1.55, 1);
+  const shieldMat = new THREE.MeshBasicMaterial({
+    color: 0x22d3ee,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.55
+  });
+  heroShieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+  heroShieldMesh.position.y = 1.35;
+  heroShieldMesh.visible = false;
+  heroGroup.add(heroShieldMesh);
+
+  // 3D Healing Light Pillar (Hidden unless Heal Triggered)
+  const beamGeo = new THREE.CylinderGeometry(1.0, 1.0, 4.2, 20, 1, true);
+  const beamMat = new THREE.MeshBasicMaterial({
+    color: 0x34d399,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.45
+  });
+  healBeamMesh = new THREE.Mesh(beamGeo, beamMat);
+  healBeamMesh.position.y = 2.1;
+  healBeamMesh.visible = false;
+  heroGroup.add(healBeamMesh);
+
+  heroGroup.position.copy(heroPos);
+  heroGroup.rotation.y = heroRotY;
+  scene.add(heroGroup);
+}
+
+function updateHero3DWeapon() {
+  if (!heroWeaponHolder) return;
+  while (heroWeaponHolder.children.length > 0) {
+    heroWeaponHolder.remove(heroWeaponHolder.children[0]);
+  }
+  const w = WEAPONS[state.hero.equippedWeapon];
+  const enhLvl = getWeaponEnhanceLevel(w.id);
+
+  // Hilt
+  const hiltGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.55, 8);
+  const hiltMat = new THREE.MeshStandardMaterial({ color: 0x451a03 });
+  const hilt = new THREE.Mesh(hiltGeo, hiltMat);
+  heroWeaponHolder.add(hilt);
+
+  // Crossguard
+  const guardGeo = new THREE.BoxGeometry(0.45, 0.09, 0.14);
+  const guardMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.7, roughness: 0.2 });
+  const guard = new THREE.Mesh(guardGeo, guardMat);
+  guard.position.y = 0.25;
+  heroWeaponHolder.add(guard);
+
+  const bladeMat = new THREE.MeshStandardMaterial({
+    color: w.color,
+    emissive: w.emissive !== 0x000000 ? w.emissive : (enhLvl > 0 ? 0xf59e0b : 0x000000),
+    emissiveIntensity: 0.55 + Math.min(0.9, enhLvl * 0.14),
+    metalness: 0.65,
+    roughness: 0.2
+  });
+
+  if (w.style === 'axe') {
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.9, 8), hiltMat);
+    shaft.position.y = 0.7;
+    heroWeaponHolder.add(shaft);
+
+    const axeHead = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.55, 0.08), bladeMat);
+    axeHead.position.y = 1.45;
+    heroWeaponHolder.add(axeHead);
+  } else if (w.style === 'halberd') {
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.5, 8), guardMat);
+    shaft.position.y = 1.0;
+    heroWeaponHolder.add(shaft);
+
+    const spearTip = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.85, 4), bladeMat);
+    spearTip.position.y = 2.45;
+    heroWeaponHolder.add(spearTip);
+
+    const crescent = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.05, 8, 16, Math.PI), bladeMat);
+    crescent.position.set(0.18, 2.0, 0);
+    crescent.rotation.z = -Math.PI / 2;
+    heroWeaponHolder.add(crescent);
+  } else {
+    // Sword or Greatsword
+    const width = w.style === 'greatsword' ? 0.26 : 0.16;
+    const length = w.style === 'greatsword' ? 1.85 : 1.45;
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(width, length, 0.06), bladeMat);
+    blade.position.y = 0.25 + length / 2;
+    blade.castShadow = true;
+    heroWeaponHolder.add(blade);
+  }
+  heroWeaponHolder.scale.setScalar(w.scale * (1 + Math.min(0.35, enhLvl * 0.045)));
+}
+
+function spawnEnemy3D(stageData) {
+  if (enemyGroup) {
+    scene.remove(enemyGroup);
+  }
+  if (chestMesh) {
+    scene.remove(chestMesh);
+    chestMesh = null;
+  }
+
+  enemyGroup = new THREE.Group();
+  enemyPos.copy(ENEMY_HOME_POS);
+  enemyGroup.position.copy(enemyPos);
+  enemyGroup.rotation.y = enemyRotY;
+
+  const mainMat = new THREE.MeshStandardMaterial({
+    color: stageData.color,
+    roughness: 0.35,
+    metalness: 0.2
+  });
+
+  if (stageData.type === 'slime') {
+    const geo = new THREE.SphereGeometry(1.15, 20, 16);
+    enemyBodyMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: stageData.color,
+      transparent: true,
+      opacity: 0.88,
+      roughness: 0.15
+    }));
+    enemyBodyMesh.scale.set(1.15, 0.85, 1.15);
+    enemyBodyMesh.position.y = 0.95;
+    enemyGroup.add(enemyBodyMesh);
+  } else if (stageData.type === 'goblin') {
+    enemyBodyMesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.5, 0.9), mainMat);
+    enemyBodyMesh.position.y = 1.1;
+    const earGeo = new THREE.ConeGeometry(0.22, 0.7, 4);
+    const earL = new THREE.Mesh(earGeo, mainMat);
+    earL.position.set(-0.8, 1.7, 0);
+    earL.rotation.z = 0.9;
+    const earR = new THREE.Mesh(earGeo, mainMat);
+    earR.position.set(0.8, 1.7, 0);
+    earR.rotation.z = -0.9;
+    enemyGroup.add(enemyBodyMesh, earL, earR);
+  } else if (stageData.type === 'golem') {
+    enemyBodyMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(1.45, 0), mainMat);
+    enemyBodyMesh.position.y = 1.45;
+    const shoulderL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), mainMat);
+    shoulderL.position.set(-1.45, 1.7, 0);
+    const shoulderR = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), mainMat);
+    shoulderR.position.set(1.45, 1.7, 0);
+    enemyGroup.add(enemyBodyMesh, shoulderL, shoulderR);
+  } else if (stageData.type === 'knight') {
+    enemyBodyMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.95, 2.2, 8), mainMat);
+    enemyBodyMesh.position.y = 1.2;
+    const helm = new THREE.Mesh(new THREE.ConeGeometry(0.75, 0.9, 6), new THREE.MeshStandardMaterial({ color: 0x1e1b4b, metalness: 0.8 }));
+    helm.position.y = 2.65;
+    enemyGroup.add(enemyBodyMesh, helm);
+  } else if (stageData.type === 'mage') {
+    enemyBodyMesh = new THREE.Mesh(new THREE.ConeGeometry(1.15, 2.6, 12), mainMat);
+    enemyBodyMesh.position.y = 1.3;
+    const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.45), new THREE.MeshStandardMaterial({ color: 0xf472b6, emissive: 0xdb2777 }));
+    orb.position.set(1.25, 1.8, 0.5);
+    enemyGroup.add(enemyBodyMesh, orb);
+  } else {
+    // Final Boss: Algebra Dragon
+    enemyBodyMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(1.85, 1), mainMat);
+    enemyBodyMesh.position.y = 1.9;
+    const wingGeo = new THREE.BoxGeometry(2.4, 0.15, 1.2);
+    const wingMat = new THREE.MeshStandardMaterial({ color: 0x991b1b });
+    const wingL = new THREE.Mesh(wingGeo, wingMat);
+    wingL.position.set(-2.1, 2.3, -0.3);
+    wingL.rotation.z = 0.35;
+    const wingR = new THREE.Mesh(wingGeo, wingMat);
+    wingR.position.set(2.1, 2.3, -0.3);
+    wingR.rotation.z = -0.35;
+    const crown = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.1, 8, 16), new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xca8a04 }));
+    crown.rotation.x = Math.PI / 2;
+    crown.position.y = 3.7;
+    enemyGroup.add(enemyBodyMesh, wingL, wingR, crown);
+  }
+
+  // Glowing Eyes for all monsters
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), eyeMat);
+  eyeL.position.set(-0.35, 1.45, 0.85);
+  const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), eyeMat);
+  eyeR.position.set(0.35, 1.45, 0.85);
+  enemyGroup.add(eyeL, eyeR);
+
+  // Ground Danger Aura Ring
+  const auraGeo = new THREE.RingGeometry(1.3, 1.55, 32);
+  const auraMat = new THREE.MeshBasicMaterial({ color: stageData.color, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+  enemyAuraMesh = new THREE.Mesh(auraGeo, auraMat);
+  enemyAuraMesh.rotation.x = -Math.PI / 2;
+  enemyAuraMesh.position.y = 0.03;
+  enemyGroup.add(enemyAuraMesh);
+
+  enemyGroup.traverse((obj) => {
+    if (obj.isMesh) obj.castShadow = true;
+  });
+
+  scene.add(enemyGroup);
+}
+
+function spawn3DVictoryChest() {
+  if (chestMesh) scene.remove(chestMesh);
+  chestMesh = new THREE.Group();
+  chestMesh.position.copy(ENEMY_HOME_POS);
+
+  const boxGeo = new THREE.BoxGeometry(1.5, 1.0, 1.05);
+  const boxMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.4, metalness: 0.3 });
+  const baseBox = new THREE.Mesh(boxGeo, boxMat);
+  baseBox.position.y = 0.5;
+  baseBox.castShadow = true;
+
+  const trimGeo = new THREE.BoxGeometry(1.56, 0.22, 1.11);
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xca8a04, emissiveIntensity: 0.4, metalness: 0.8, roughness: 0.2 });
+  const trim = new THREE.Mesh(trimGeo, trimMat);
+  trim.position.y = 0.95;
+
+  const lock = new THREE.Mesh(new THREE.OctahedronGeometry(0.24), trimMat);
+  lock.position.set(0, 0.85, 0.58);
+
+  chestMesh.add(baseBox, trim, lock);
+  chestMesh.rotation.y = enemyRotY;
+  scene.add(chestMesh);
+}
+
+function spawnSwordRainUltimate() {
+  const bladeGeo = new THREE.BoxGeometry(0.18, 2.2, 0.06);
+  const bladeMat = new THREE.MeshBasicMaterial({ color: 0xf43f5e });
+  for (let i = 0; i < 14; i++) {
+    const sword = new THREE.Mesh(bladeGeo, bladeMat);
+    sword.position.set(
+      ENEMY_HOME_POS.x + (Math.random() - 0.5) * 3.2,
+      6.5 + Math.random() * 4.5,
+      ENEMY_HOME_POS.z + (Math.random() - 0.5) * 3.2
+    );
+    sword.rotation.z = (Math.random() - 0.5) * 0.25;
+    scene.add(sword);
+    swordRainMeshes.push({ mesh: sword, speed: 18 + Math.random() * 6 });
+  }
+}
+
+function spawnHitParticles(pos, colorHex, count = 16) {
+  const geo = new THREE.OctahedronGeometry(0.16, 0);
+  const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+  for (let i = 0; i < count; i++) {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.position.y += 1.2;
+    const vel = new THREE.Vector3(
+      (Math.random() - 0.5) * 7,
+      Math.random() * 5 + 2,
+      (Math.random() - 0.5) * 7
+    );
+    scene.add(mesh);
+    particles.push({ mesh, vel, life: 0.7 });
+  }
+}
+
+function spawnSlashArc(isCrit) {
+  const geo = new THREE.RingGeometry(1.2, isCrit ? 2.4 : 1.7, 24, 1, 0, Math.PI * 1.2);
+  const mat = new THREE.MeshBasicMaterial({
+    color: isCrit ? 0xfacc15 : 0x38bdf8,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.9
+  });
+  const arc = new THREE.Mesh(geo, mat);
+  arc.position.copy(enemyGroup.position);
+  arc.position.y = 1.3;
+  arc.rotation.x = Math.PI / 4;
+  arc.rotation.z = Math.random() * Math.PI;
+  scene.add(arc);
+  slashArcs.push({ mesh: arc, life: 0.35 });
+}
+
+function spawnEnemySkillVFX(intentType, stageColor, onImpactCallback) {
+  const startPos = enemyPos.clone().add(new THREE.Vector3(0, 1.5, 0));
+  const targetPos = heroPos.clone().add(new THREE.Vector3(0, 1.2, 0));
+
+  if (intentType === 'heavy') {
+    // Charging Dark-Flame Shockwave + Meteor Orb
+    spawnHitParticles(startPos, 0xf97316, 22);
+    const orbGeo = new THREE.DodecahedronGeometry(0.65, 1);
+    const orbMat = new THREE.MeshBasicMaterial({ color: 0xf97316, wireframe: false });
+    const orb = new THREE.Mesh(orbGeo, orbMat);
+    orb.position.copy(startPos);
+
+    const haloGeo = new THREE.RingGeometry(0.75, 1.1, 24);
+    const haloMat = new THREE.MeshBasicMaterial({ color: 0xfef08a, side: THREE.DoubleSide, transparent: true, opacity: 0.85 });
+    const halo = new THREE.Mesh(haloGeo, haloMat);
+    orb.add(halo);
+
+    scene.add(orb);
+    enemyProjectiles.push({
+      mesh: orb,
+      start: startPos,
+      target: targetPos,
+      progress: 0,
+      speed: 2.3,
+      color: 0xf97316,
+      isHeavy: true,
+      onImpact: onImpactCallback
+    });
+  } else if (intentType === 'hex') {
+    // Swirling Purple Chaos Ring + MP Drain Bolts
+    spawnHitParticles(startPos, 0xd946ef, 20);
+    const hexGeo = new THREE.TorusKnotGeometry(0.45, 0.14, 36, 8);
+    const hexMat = new THREE.MeshBasicMaterial({ color: 0xe879f9 });
+    const hexMesh = new THREE.Mesh(hexGeo, hexMat);
+    hexMesh.position.copy(startPos);
+    scene.add(hexMesh);
+    enemyProjectiles.push({
+      mesh: hexMesh,
+      start: startPos,
+      target: targetPos,
+      progress: 0,
+      speed: 2.5,
+      color: 0xd946ef,
+      isHeavy: false,
+      onImpact: onImpactCallback
+    });
+  } else {
+    // Fast Crimson Claw Slash Projectile
+    const clawGeo = new THREE.ConeGeometry(0.38, 1.35, 5);
+    clawGeo.rotateX(Math.PI / 2);
+    const clawMat = new THREE.MeshBasicMaterial({ color: stageColor || 0xf43f5e });
+    const claw = new THREE.Mesh(clawGeo, clawMat);
+    claw.position.copy(startPos);
+    claw.lookAt(targetPos);
+    scene.add(claw);
+    enemyProjectiles.push({
+      mesh: claw,
+      start: startPos,
+      target: targetPos,
+      progress: 0,
+      speed: 3.1,
+      color: stageColor || 0xf43f5e,
+      isHeavy: false,
+      onImpact: onImpactCallback
+    });
+  }
+}
+
+function showFloatingText(worldPos, text, colorClass = 'text-yellow-300 text-2xl') {
+  const vec = worldPos.clone();
+  vec.y += 2.2;
+  vec.project(camera);
+
+  const x = (vec.x * 0.5 + 0.5) * window.innerWidth;
+  const y = (-(vec.y * 0.5) + 0.5) * window.innerHeight;
+
+  const el = document.createElement('div');
+  el.className = `floating-dmg ${colorClass}`;
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  el.innerHTML = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1050);
+}
+
+/**
+ * ============================================================================
+ * 6. TURN-BASED COMBAT COMMANDS, MATH CHALLENGE & ENEMY AI TURN
+ * ============================================================================
+ */
+function setTurnPhase(newPhase, customBannerText = null) {
+  state.turn.phase = newPhase;
+  const phaseEl = document.getElementById('turn-phase-text');
+  const numEl = document.getElementById('turn-number-badge');
+  numEl.textContent = `第 ${state.turn.number} 回合`;
+
+  const btns = document.querySelectorAll('.cmd-btn');
+  const isPlayerTurn = newPhase === 'PLAYER_INPUT';
+
+  btns.forEach((b) => {
+    if (b.id === 'cmd-ult') {
+      b.disabled = !isPlayerTurn || state.hero.rage < 100;
+    } else {
+      b.disabled = !isPlayerTurn;
+    }
+  });
+
+  if (customBannerText) {
+    phaseEl.textContent = customBannerText;
+  } else if (newPhase === 'PLAYER_INPUT') {
+    state.turn.cameraFocus = 'PLAYER';
+    phaseEl.textContent = '⚔️ 勇者行動階段 — 請選擇策略指令';
+    phaseEl.className = 'text-xs sm:text-sm font-black text-amber-200 tracking-wide';
+  } else if (newPhase === 'PLAYER_ANIM') {
+    state.turn.cameraFocus = 'NEUTRAL';
+    phaseEl.textContent = '⚡ 勇者發動招式中...';
+    phaseEl.className = 'text-xs sm:text-sm font-black text-sky-300 tracking-wide';
+  } else if (newPhase === 'ENEMY_TURN') {
+    state.turn.cameraFocus = 'ENEMY';
+    phaseEl.textContent = '👁️ 怪物行動階段 — 注意防禦！';
+    phaseEl.className = 'text-xs sm:text-sm font-black text-rose-300 tracking-wide';
+  } else if (newPhase === 'VICTORY') {
+    state.turn.cameraFocus = 'ENEMY';
+    phaseEl.textContent = '🏆 討伐勝利 — 請開啟寶箱！';
+    phaseEl.className = 'text-xs sm:text-sm font-black text-yellow-300 tracking-wide';
+  } else if (newPhase === 'DEFEAT') {
+    state.turn.cameraFocus = 'PLAYER';
+    phaseEl.textContent = '💀 勇者力竭倒下 — 戰鬥結束！';
+    phaseEl.className = 'text-xs sm:text-sm font-black text-rose-400 tracking-wide';
+  }
+}
+
+// Helper: Animate hero dashing to enemy, striking, and returning home
+function executeHeroMeleeSequence(dmg, isCrit, onComplete) {
+  setTurnPhase('PLAYER_ANIM');
+  const dashTarget = new THREE.Vector3().lerpVectors(HERO_HOME_POS, ENEMY_HOME_POS, 0.68);
+  let step = 0;
+
+  const dashInterval = setInterval(() => {
+    step++;
+    if (step <= 10) {
+      // Dash forward
+      heroPos.lerp(dashTarget, 0.32);
+    } else if (step === 11) {
+      // Impact frame!
+      heroSwingAnim = 1.1;
+      if (isCrit) sfx.critSlash();
+      else sfx.slash();
+      applyDamageToEnemy(dmg, isCrit);
+    } else if (step <= 22) {
+      // Leap back to home pedestal
+      heroPos.lerp(HERO_HOME_POS, 0.32);
+    } else {
+      heroPos.copy(HERO_HOME_POS);
+      clearInterval(dashInterval);
+      if (onComplete) onComplete();
+    }
+  }, 28);
+}
+
+// CMD 1: Normal Attack (65% damage, restores +20 MP & +15 Rage so Algebra skills remain key)
+function cmdNormalAttack() {
+  if (state.turn.phase !== 'PLAYER_INPUT' || state.enemy.isDead) return;
+  const variance = 0.92 + Math.random() * 0.14;
+  const dmg = Math.max(1, Math.round(getTotalAtk() * 0.65 * variance));
+
+  state.hero.mp = Math.min(state.hero.maxMp, state.hero.mp + 20);
+  state.hero.rage = Math.min(100, state.hero.rage + 15);
+  updateHUD();
+
+  executeHeroMeleeSequence(dmg, false, () => {
+    if (!state.enemy.isDead) startEnemyTurn();
+  });
+}
+
+// CMD 2: Algebra Power Strike (Math Quiz -> 300% Crit + 10% ATK Buff)
+function cmdAlgebraPowerStrike() {
+  if (state.turn.phase !== 'PLAYER_INPUT' || state.enemy.isDead) return;
+  openMathModal('power', getNextQuestion());
+}
+
+// CMD 3: Identity Shield (Math Quiz -> 80% Damage Reduction + 30% Reflect)
+function cmdIdentityShield() {
+  if (state.turn.phase !== 'PLAYER_INPUT' || state.enemy.isDead) return;
+  openMathModal('shield', getNextQuestion());
+}
+
+// CMD 4: Algebra Heal (Spend 30 MP or Solve Math Quiz to Heal 35% Max HP)
+function cmdAlgebraHeal() {
+  if (state.turn.phase !== 'PLAYER_INPUT' || state.enemy.isDead) return;
+  if (state.hero.hp >= state.hero.maxHp) {
+    showToast('❤️ 生命值已滿，無需治療！');
+    return;
+  }
+  if (state.hero.mp >= 30) {
+    // Direct MP Heal
+    state.hero.mp -= 30;
+    const healAmt = Math.round(state.hero.maxHp * 0.35);
+    state.hero.hp = Math.min(state.hero.maxHp, state.hero.hp + healAmt);
+    sfx.heal();
+    healBeamTimer = 1.1;
+    spawnHitParticles(heroPos, 0x34d399, 22);
+    showFloatingText(heroPos, `💚 +${healAmt} HP`, 'text-emerald-300 text-2xl');
+    updateHUD();
+    setTurnPhase('PLAYER_ANIM', '💚 施展生命回復術！');
+    setTimeout(() => {
+      if (!state.enemy.isDead) startEnemyTurn();
+    }, 850);
+  } else {
+    // Insufficient MP -> Solve Algebra Question to Heal for Free!
+    showToast('💧 魔力不足 30，進入「解題冥想治療」！');
+    openMathModal('heal', getNextQuestion());
+  }
+}
+
+// CMD 5: Ultimate Skill - 微積分前奏 (100% Rage -> 450% Sword Array)
+function cmdUltimateSkill() {
+  if (state.turn.phase !== 'PLAYER_INPUT' || state.hero.rage < 100 || state.enemy.isDead) return;
+  state.hero.rage = 0;
+  updateHUD();
+
+  setTurnPhase('PLAYER_ANIM', '🔥 奧義解放：微積分前奏 · 萬劍歸宗！');
+  sfx.ultimate();
+  spawnSwordRainUltimate();
+
+  const ultDmg = Math.round(getTotalAtk() * 4.5);
+  setTimeout(() => {
+    if (state.enemy.isDead) return;
+    applyDamageToEnemy(ultDmg, true);
+    cameraShakeTimer = 0.35;
+    setTimeout(() => {
+      if (!state.enemy.isDead) startEnemyTurn();
+    }, 750);
+  }, 420);
+}
+
+// Enemy Turn Execution with 3D Skill Projectiles & Impact Effects
+function startEnemyTurn() {
+  if (state.enemy.isDead) return;
+  setTurnPhase('ENEMY_TURN');
+
+  const intent = state.enemy.intent;
+  const stage = STAGES[state.stageIdx];
+
+  // Telegraph charge aura on enemy
+  spawnHitParticles(enemyPos, intent.type === 'heavy' ? 0xf97316 : intent.type === 'hex' ? 0xd946ef : stage.color, 18);
+
+  setTimeout(() => {
+    if (state.enemy.isDead) return;
+    enemyLungeAnim = 1.0;
+
+    // Launch 3D Skill VFX from Monster to Hero
+    spawnEnemySkillVFX(intent.type, stage.color, () => {
+      if (state.enemy.isDead) return;
+
+      let rawDmg = Math.max(4, Math.round(stage.atk * intent.mult * (0.92 + Math.random() * 0.16)));
+
+      // Check Hero Identity Shield
+      let finalDmg = rawDmg;
+      let reflectedDmg = 0;
+      if (state.hero.shieldBlockPct > 0) {
+        finalDmg = Math.max(1, Math.round(rawDmg * (1 - state.hero.shieldBlockPct)));
+        reflectedDmg = Math.round(rawDmg * state.hero.shieldReflectPct);
+        showFloatingText(heroPos, `🛡️ 護盾減傷 -${finalDmg}`, 'text-cyan-300 text-2xl');
+        spawnHitParticles(heroPos, 0x22d3ee, 28);
+        sfx.shieldUp();
+      } else {
+        showFloatingText(
+          heroPos,
+          intent.type === 'heavy' ? `💥 猛擊 -${finalDmg}!` : `-${finalDmg}`,
+          intent.type === 'heavy' ? 'text-orange-400 text-3xl' : 'text-rose-400 text-2xl'
+        );
+        cameraShakeTimer = intent.type === 'heavy' ? 0.35 : 0.18;
+        sfx.hitPlayer();
+      }
+
+      // Apply Hex MP Drain if applicable
+      if (intent.type === 'hex') {
+        state.hero.mp = Math.max(0, state.hero.mp - 15);
+        showToast('🧪 怪物施放代數干擾，吸取了 15 點 MP！');
+      }
+
+      // Apply real HP damage
+      state.hero.hp = Math.max(0, state.hero.hp - finalDmg);
+      state.hero.rage = Math.min(100, state.hero.rage + 18);
+
+      // Consume shield after absorbing attack
+      state.hero.shieldBlockPct = 0;
+      state.hero.shieldReflectPct = 0;
+      heroShieldMesh.visible = false;
+
+      // Apply shield reflection damage if any
+      if (reflectedDmg > 0) {
+        setTimeout(() => {
+          showFloatingText(enemyPos, `✨ 恆等反彈 -${reflectedDmg}`, 'text-cyan-200 text-xl');
+          applyDamageToEnemy(reflectedDmg, false);
+        }, 280);
+      }
+
+      updateHUD();
+
+      // Check if Hero fell in battle
+      if (state.hero.hp <= 0) {
+        setTimeout(() => handleHeroDefeated(), 450);
+        return;
+      }
+
+      // Advance Turn Counter & Roll Next Enemy Intent
+      setTimeout(() => {
+        if (!state.enemy.isDead && state.hero.hp > 0) {
+          state.turn.number++;
+          rollEnemyIntent();
+          updateHUD();
+          setTurnPhase('PLAYER_INPUT');
+        }
+      }, 750);
+    });
+  }, 450);
+}
+
+function handleHeroDefeated() {
+  setTurnPhase('DEFEAT');
+  sfx.wrong();
+  spawnHitParticles(heroPos, 0xf43f5e, 32);
+  const stage = STAGES[state.stageIdx];
+  document.getElementById('defeat-reason-text').textContent =
+    `你在第 ${state.turn.number} 回合不敵【${stage.name}】的猛烈攻勢！`;
+  document.getElementById('defeat-modal').classList.remove('hidden');
+}
+
+function triggerReviveChallenge() {
+  document.getElementById('defeat-modal').classList.add('hidden');
+  openMathModal('revive');
+}
+
+function retreatAndHeal() {
+  document.getElementById('defeat-modal').classList.add('hidden');
+  state.hero.hp = state.hero.maxHp;
+  state.hero.mp = state.hero.maxMp;
+  state.hero.rage = 0;
+  heroGroup.rotation.z = 0;
+  heroGroup.position.y = 0;
+  loadStage(0);
+  showToast('🏕️ 已撤退至第 1 關營地，生命與魔力已完全恢復！');
+}
+
+function fullRestartGame() {
+  document.getElementById('defeat-modal').classList.add('hidden');
+  state.hero.lvl = 1;
+  state.hero.maxHp = 140;
+  state.hero.hp = 140;
+  state.hero.maxMp = 100;
+  state.hero.mp = 60;
+  state.hero.rage = 0;
+  state.hero.exp = 0;
+  state.hero.nextExp = 100;
+  state.hero.baseAtk = 20;
+  state.hero.gold = 50;
+  state.hero.ore = 1;
+  state.hero.score = 0;
+  state.hero.equippedWeapon = 0;
+  state.hero.unlockedWeapons = [0];
+  state.hero.weaponEnhanceLevels = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
+  heroGroup.rotation.z = 0;
+  heroGroup.position.y = 0;
+  updateHero3DWeapon();
+  loadStage(0);
+  showToast('🔄 冒險已完全重置！從第 1 關重新出發！');
+}
+
+// CMD 2: Algebra Power Strike
+function cmdAlgebraPowerStrike() {
+  if (state.turn.phase !== 'PLAYER_INPUT' || state.enemy.isDead) return;
+  openMathModal('power');
+}
+
+// CMD 3: Identity Shield
+function cmdIdentityShield() {
+  if (state.turn.phase !== 'PLAYER_INPUT' || state.enemy.isDead) return;
+  openMathModal('shield');
+}
+
+// CMD 4: Algebra Heal
+function cmdAlgebraHeal() {
+  if (state.turn.phase !== 'PLAYER_INPUT' || state.enemy.isDead) return;
+  if (state.hero.hp >= state.hero.maxHp) {
+    showToast('❤️ 生命值已滿，無需治療！');
+    return;
+  }
+  if (state.hero.mp >= 30) {
+    state.hero.mp -= 30;
+    const healAmt = Math.round(state.hero.maxHp * 0.35);
+    state.hero.hp = Math.min(state.hero.maxHp, state.hero.hp + healAmt);
+    sfx.heal();
+    healBeamTimer = 1.1;
+    spawnHitParticles(heroPos, 0x34d399, 22);
+    showFloatingText(heroPos, `💚 +${healAmt} HP`, 'text-emerald-300 text-2xl');
+    updateHUD();
+    setTurnPhase('PLAYER_ANIM', '💚 施展生命回復術！');
+    setTimeout(() => {
+      if (!state.enemy.isDead) startEnemyTurn();
+    }, 850);
+  } else {
+    showToast('💧 魔力不足 30，進入「解題冥想治療」！');
+    openMathModal('heal');
+  }
+}
+
+function applyDamageToEnemy(dmg, isCrit) {
+  if (state.enemy.isDead) return;
+  state.enemy.hp = Math.max(0, state.enemy.hp - dmg);
+  enemyHitAnim = 1.0;
+  spawnSlashArc(isCrit);
+  spawnHitParticles(enemyPos, isCrit ? 0xfacc15 : 0x38bdf8, isCrit ? 28 : 14);
+
+  showFloatingText(
+    enemyPos,
+    isCrit ? `💥 暴擊 -${dmg}!` : `-${dmg}`,
+    isCrit ? 'text-yellow-300 text-3xl' : 'text-white text-2xl'
+  );
+
+  updateHUD();
+
+  if (state.enemy.hp <= 0) {
+    handleEnemyDefeated();
+  }
+}
+
+function handleEnemyDefeated() {
+  if (state.enemy.isDead) return;
+  state.enemy.isDead = true;
+  setTurnPhase('VICTORY');
+
+  try {
+    sfx.levelUp();
+  } catch (e) {}
+
+  if (typeof spawnHitParticles === 'function') {
+    spawnHitParticles(enemyPos, 0xfacc15, 42);
+  }
+
+  // Hide monster and spawn 3D Treasure Chest in its place
+  if (enemyGroup) enemyGroup.visible = false;
+  if (typeof spawn3DVictoryChest === 'function') {
+    spawn3DVictoryChest();
+  }
+
+  const stage = STAGES[state.stageIdx];
+  const diffMult = state.difficulty === 'challenge' ? 1.5 : state.difficulty === 'extended' ? 1.25 : 1.0;
+
+  // Turn-efficiency score calculation: fewer turns = dramatically higher score!
+  const turnsUsed = Math.max(1, state.turn.number);
+  const baseStageScore = stage.stage * 300;
+  const speedBonus = Math.max(80, Math.round((1300 / turnsUsed) * (0.8 + stage.stage * 0.2)));
+  const earnedScore = Math.round((baseStageScore + speedBonus) * diffMult);
+
+  let rankText = '評級 C · 穩紮穩打';
+  let rankClass = 'bg-slate-700 text-slate-200 font-black text-xs px-2.5 py-0.5 rounded-full';
+  if (turnsUsed <= 2) {
+    rankText = '評級 S+ · 神速秒殺！';
+    rankClass = 'bg-gradient-to-r from-yellow-300 via-amber-400 to-rose-400 text-slate-950 font-black text-xs px-2.5 py-0.5 rounded-full shadow';
+  } else if (turnsUsed <= 4) {
+    rankText = '評級 S · 完美速攻！';
+    rankClass = 'bg-gradient-to-r from-emerald-300 to-cyan-300 text-slate-950 font-black text-xs px-2.5 py-0.5 rounded-full shadow';
+  } else if (turnsUsed <= 6) {
+    rankText = '評級 A · 表現優秀！';
+    rankClass = 'bg-sky-500 text-slate-950 font-black text-xs px-2.5 py-0.5 rounded-full';
+  } else if (turnsUsed <= 9) {
+    rankText = '評級 B · 成功突破';
+    rankClass = 'bg-indigo-500 text-white font-black text-xs px-2.5 py-0.5 rounded-full';
+  }
+
+  state.pendingRewards = {
+    score: earnedScore,
+    exp: Math.round(stage.exp * diffMult),
+    gold: Math.round(stage.gold * diffMult),
+    ore: stage.ore,
+    upgraded: false
+  };
+
+  const rankBadge = document.getElementById('victory-rank-badge');
+  rankBadge.textContent = rankText;
+  rankBadge.className = rankClass;
+
+  document.getElementById('victory-enemy-name').textContent = `你成功討伐了【${stage.name}】（耗時 ${turnsUsed} 回合）！`;
+  document.getElementById('rew-score').textContent = `+${state.pendingRewards.score} 🏅`;
+  document.getElementById('rew-exp').textContent = `+${state.pendingRewards.exp} EXP`;
+  document.getElementById('rew-gold').textContent = `+${state.pendingRewards.gold} 🪙`;
+  document.getElementById('rew-ore').textContent = `+${state.pendingRewards.ore} 💎`;
+
+  const chestStatus = document.getElementById('chest-upgrade-status');
+  chestStatus.textContent = '📦 青銅寶箱：破解【黃金密碼鎖】可將所有獎勵翻倍！';
+  chestStatus.className = 'mt-2.5 text-xs font-bold text-amber-300 bg-amber-500/10 py-1.5 px-3 rounded-xl border border-amber-500/30';
+
+  const chestBtn = document.getElementById('btn-chest-challenge');
+  chestBtn.disabled = false;
+  chestBtn.classList.remove('hidden');
+
+  setTimeout(() => {
+    const vModal = document.getElementById('victory-modal');
+    if (vModal) vModal.classList.remove('hidden');
+  }, 450);
+}
+
+function getNextQuestion() {
+  const pool = QUESTION_BANK[state.difficulty];
+  let used = state.usedQuestionIndices[state.difficulty];
+  if (used.length >= pool.length) {
+    used.length = 0;
+  }
+  let idx;
+  do {
+    idx = Math.floor(Math.random() * pool.length);
+  } while (used.includes(idx));
+  used.push(idx);
+  return pool[idx];
+}
+
+function triggerChestBonusQuestion() {
+  openMathModal('chest');
+}
+
+function updateModalDifficultySelectorUI(mode, tier) {
+  const eff = DIFF_EFFECTS[tier];
+  document.getElementById('math-effect-preview').textContent = eff.previews[mode];
+
+  const diffBadge = document.getElementById('math-modal-diff-badge');
+  diffBadge.textContent = eff.label;
+  if (tier === 'basic') {
+    diffBadge.className = 'text-xs font-black px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+  } else if (tier === 'extended') {
+    diffBadge.className = 'text-xs font-black px-2.5 py-1 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/40';
+  } else {
+    diffBadge.className = 'text-xs font-black px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40';
+  }
+
+  const styles = {
+    basic: 'bg-emerald-500 text-slate-950 border-emerald-300 shadow',
+    extended: 'bg-sky-400 text-slate-950 border-sky-200 shadow',
+    challenge: 'bg-rose-500 text-white border-rose-300 shadow'
+  };
+  ['basic', 'extended', 'challenge'].forEach((k) => {
+    const btn = document.getElementById(`modal-diff-${k}`);
+    if (!btn) return;
+    if (k === tier) {
+      btn.className = `py-1.5 px-2 rounded-xl text-xs font-black transition border ${styles[k]}`;
+    } else {
+      btn.className = 'py-1.5 px-2 rounded-xl text-xs font-bold transition border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200';
+    }
+  });
+}
+
+function switchQuestionDifficultyInModal(newTier) {
+  if (!state.activeMathContext || state.activeMathContext.answered) return;
+  setDifficulty(newTier);
+  openMathModal(state.activeMathContext.mode);
+}
+
+function openMathModal(mode, customQObj = null) {
+  const qObj = customQObj || getNextQuestion();
+  const tier = state.difficulty;
+  const eff = DIFF_EFFECTS[tier];
+  state.activeMathContext = { mode, tier, qObj, isCorrect: false, answered: false };
+
+  const modeBadge = document.getElementById('math-modal-mode-badge');
+  const topicBadge = document.getElementById('math-modal-topic-badge');
+  const qText = document.getElementById('math-question-text');
+  const optGrid = document.getElementById('math-options-grid');
+  const fbBox = document.getElementById('math-feedback-box');
+  const contBtn = document.getElementById('math-continue-btn');
+
+  if (mode === 'power') {
+    modeBadge.textContent = '⚡ 聚力代數斬';
+    modeBadge.className = 'bg-amber-500 text-slate-950 font-black text-xs px-3 py-1 rounded-full';
+    contBtn.textContent = '發動代數斬！ ⚔️';
+  } else if (mode === 'shield') {
+    modeBadge.textContent = '🛡️ 恆等式護盾';
+    modeBadge.className = 'bg-cyan-400 text-slate-950 font-black text-xs px-3 py-1 rounded-full';
+    contBtn.textContent = '展開幾何護盾！ 🛡️';
+  } else if (mode === 'heal') {
+    modeBadge.textContent = '💚 冥想治療術';
+    modeBadge.className = 'bg-emerald-400 text-slate-950 font-black text-xs px-3 py-1 rounded-full';
+    contBtn.textContent = '施放治癒之光！ ✨';
+  } else if (mode === 'revive') {
+    modeBadge.textContent = '✨ 代數復甦試煉';
+    modeBadge.className = 'bg-emerald-400 text-slate-950 font-black text-xs px-3 py-1 rounded-full';
+    contBtn.textContent = '重新站起來！ 🔥';
+  } else {
+    modeBadge.textContent = '🔐 黃金密碼鎖';
+    modeBadge.className = 'bg-yellow-400 text-slate-950 font-black text-xs px-3 py-1 rounded-full';
+    contBtn.textContent = '解鎖黃金寶箱！ 👑';
+  }
+
+  topicBadge.textContent = qObj.topic;
+  updateModalDifficultySelectorUI(mode, tier);
+
+  qText.innerHTML = qObj.q;
+  fbBox.classList.add('hidden');
+  contBtn.classList.add('hidden');
+
+  const indexedOpts = qObj.options.map((opt, i) => ({ opt, isTarget: i === qObj.ans }));
+  indexedOpts.sort(() => Math.random() - 0.5);
+
+  optGrid.innerHTML = '';
+  const labels = ['A', 'B', 'C', 'D'];
+  indexedOpts.forEach((item, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'opt-choice-btn rpg-btn bg-slate-800 hover:bg-slate-700 border-2 border-slate-600 rounded-2xl p-3.5 text-left flex items-center gap-3 text-white font-bold text-sm sm:text-base';
+    btn.innerHTML = `
+      <span class="w-7 h-7 rounded-lg bg-slate-700 text-amber-300 font-black text-xs flex items-center justify-center shrink-0">${labels[idx]}</span>
+      <span class="flex-1">${item.opt}</span>
+    `;
+    btn.onclick = () => handleOptionSelected(btn, item.isTarget, indexedOpts);
+    optGrid.appendChild(btn);
+  });
+
+  document.getElementById('math-modal').classList.remove('hidden');
+}
+
+function handleOptionSelected(selectedBtn, isCorrect, indexedOpts) {
+  const allBtns = document.querySelectorAll('.opt-choice-btn');
+  allBtns.forEach((b, i) => {
+    b.disabled = true;
+    if (indexedOpts[i].isTarget) {
+      b.classList.remove('bg-slate-800', 'border-slate-600');
+      b.classList.add('bg-emerald-900/80', 'border-emerald-400');
+    }
+  });
+
+  if (!isCorrect) {
+    selectedBtn.classList.remove('bg-slate-800', 'border-slate-600');
+    selectedBtn.classList.add('bg-rose-900/80', 'border-rose-500');
+  }
+
+  state.activeMathContext.isCorrect = isCorrect;
+  state.activeMathContext.answered = true;
+  const { mode, tier, qObj } = state.activeMathContext;
+  const eff = DIFF_EFFECTS[tier];
+
+  const fbBox = document.getElementById('math-feedback-box');
+  const fbTitle = document.getElementById('math-feedback-title');
+  const fbExp = document.getElementById('math-feedback-exp');
+
+  fbBox.classList.remove('hidden', 'bg-emerald-950/90', 'border-emerald-500', 'bg-rose-950/90', 'border-rose-500');
+  if (isCorrect) {
+    sfx.correct();
+    fbBox.classList.add('bg-emerald-950/90', 'border-emerald-500');
+    const titleMap = {
+      power: `✅ 回答正確！發動 ${Math.round(eff.powerMult * 100)}% 暴擊光束斬 + 本場攻擊 +${eff.powerAtkBuff}%！`,
+      shield: `✅ 回答正確！展開恆等式護盾（減傷 ${Math.round(eff.shieldBlock * 100)}% + 反彈 ${Math.round(eff.shieldReflect * 100)}%）！`,
+      heal: `✅ 回答正確！冥想共鳴成功，回復 ${Math.round(eff.healPct * 100)}% 最大生命值！`,
+      revive: `✅ 試煉通過！勇者奇蹟復甦（回復 ${Math.round(eff.reviveHpPct * 100)}% 生命值）！`,
+      chest: `✅ 密碼解開！寶箱進化為【榮耀寶箱 (${eff.chestMult} 倍獎勵)】！`
+    };
+    fbTitle.textContent = titleMap[mode];
+    fbTitle.className = 'font-black text-sm sm:text-base mb-1 text-emerald-300';
+  } else {
+    sfx.wrong();
+    fbBox.classList.add('bg-rose-950/90', 'border-rose-500');
+    const failMap = {
+      power: '❌ 計算有誤！蓄力失準僅造成 50% 擦傷，請參考詳解：',
+      shield: '❌ 計算有誤！護盾能量不穩，僅獲得 25% 基礎防禦：',
+      heal: '❌ 計算有誤！治療術中斷，僅微量回復 10% 生命：',
+      revive: '❌ 試煉失敗！將送回第 1 關營地休整，請參考詳解：',
+      chest: '❌ 密碼錯誤！寶箱維持原狀，請參考詳解：'
+    };
+    fbTitle.textContent = failMap[mode];
+    fbTitle.className = 'font-black text-sm sm:text-base mb-1 text-rose-300';
+  }
+
+  fbExp.innerHTML = `<strong>解題解析：</strong>${qObj.exp}`;
+  document.getElementById('math-continue-btn').classList.remove('hidden');
+}
+
+function resolveMathModal() {
+  document.getElementById('math-modal').classList.add('hidden');
+  const { mode, tier, isCorrect } = state.activeMathContext;
+  const eff = DIFF_EFFECTS[tier];
+
+  if (mode === 'power') {
+    if (isCorrect) {
+      state.hero.battleAtkBonusPct += eff.powerAtkBuff;
+      state.hero.rage = Math.min(100, state.hero.rage + eff.powerRage);
+      const critDmg = Math.round(getTotalAtk() * eff.powerMult);
+      updateHUD();
+      executeHeroMeleeSequence(critDmg, true, () => {
+        if (!state.enemy.isDead) startEnemyTurn();
+      });
+    } else {
+      const weakDmg = Math.max(1, Math.round(getTotalAtk() * 0.5));
+      executeHeroMeleeSequence(weakDmg, false, () => {
+        if (!state.enemy.isDead) startEnemyTurn();
+      });
+    }
+  } else if (mode === 'shield') {
+    sfx.shieldUp();
+    heroShieldMesh.visible = true;
+    if (isCorrect) {
+      state.hero.shieldBlockPct = eff.shieldBlock;
+      state.hero.shieldReflectPct = eff.shieldReflect;
+      state.hero.rage = Math.min(100, state.hero.rage + 25);
+      showFloatingText(heroPos, `🛡️ 恆等護盾 (${Math.round(eff.shieldBlock * 100)}%)`, 'text-cyan-300 text-2xl');
+    } else {
+      state.hero.shieldBlockPct = 0.25;
+      state.hero.shieldReflectPct = 0;
+      showFloatingText(heroPos, '🛡️ 基礎護盾 (25%)', 'text-slate-300 text-xl');
+    }
+    updateHUD();
+    setTurnPhase('PLAYER_ANIM', '🛡️ 恆等式護盾已展開！');
+    setTimeout(() => {
+      if (!state.enemy.isDead) startEnemyTurn();
+    }, 850);
+  } else if (mode === 'heal') {
+    sfx.heal();
+    healBeamTimer = 1.1;
+    const pct = isCorrect ? eff.healPct : 0.10;
+    const healAmt = Math.round(state.hero.maxHp * pct);
+    state.hero.hp = Math.min(state.hero.maxHp, state.hero.hp + healAmt);
+    if (isCorrect && tier === 'challenge') {
+      state.hero.mp = Math.min(state.hero.maxMp, state.hero.mp + 20);
+    }
+    spawnHitParticles(heroPos, 0x34d399, isCorrect ? 24 : 10);
+    showFloatingText(heroPos, `💚 +${healAmt} HP`, 'text-emerald-300 text-2xl');
+    updateHUD();
+    setTurnPhase('PLAYER_ANIM', '💚 治療完成！');
+    setTimeout(() => {
+      if (!state.enemy.isDead) startEnemyTurn();
+    }, 850);
+  } else if (mode === 'revive') {
+    if (isCorrect) {
+      sfx.levelUp();
+      healBeamTimer = 1.3;
+      heroGroup.rotation.z = 0;
+      heroGroup.position.y = 0;
+      state.hero.hp = Math.max(1, Math.round(state.hero.maxHp * eff.reviveHpPct));
+      state.hero.mp = state.hero.maxMp;
+      if (tier === 'challenge') {
+        state.hero.rage = 100;
+      }
+      spawnHitParticles(heroPos, 0x34d399, 32);
+      showFloatingText(heroPos, '✨ 勇者復甦！', 'text-emerald-300 text-2xl');
+      updateHUD();
+      setTurnPhase('PLAYER_INPUT');
+    } else {
+      retreatAndHeal();
+    }
+  } else if (mode === 'chest') {
+    const chestBtn = document.getElementById('btn-chest-challenge');
+    chestBtn.disabled = true;
+    chestBtn.classList.add('hidden');
+
+    if (isCorrect && !state.pendingRewards.upgraded) {
+      state.pendingRewards.upgraded = true;
+      const mult = eff.chestMult;
+      state.pendingRewards.score = Math.round(state.pendingRewards.score * mult);
+      state.pendingRewards.exp = Math.round(state.pendingRewards.exp * mult);
+      state.pendingRewards.gold = Math.round(state.pendingRewards.gold * mult);
+      state.pendingRewards.ore = Math.max(2, Math.round(state.pendingRewards.ore * mult));
+
+      document.getElementById('rew-score').textContent = `+${state.pendingRewards.score} 🏅`;
+      document.getElementById('rew-exp').textContent = `+${state.pendingRewards.exp} EXP`;
+      document.getElementById('rew-gold').textContent = `+${state.pendingRewards.gold} 🪙`;
+      document.getElementById('rew-ore').textContent = `+${state.pendingRewards.ore} 💎`;
+
+      const chestStatus = document.getElementById('chest-upgrade-status');
+      chestStatus.textContent = `👑 榮耀寶箱已解鎖！所有獎勵已倍增 ${mult} 倍！`;
+      chestStatus.className = 'mt-2.5 text-xs font-black text-yellow-200 bg-yellow-500/25 py-1.5 px-3 rounded-xl border border-yellow-400';
+      if (chestMesh) {
+        spawnHitParticles(ENEMY_HOME_POS, 0xfacc15, 35);
+      }
+    }
+  }
+}
+
+function claimVictoryRewards() {
+  document.getElementById('victory-modal').classList.add('hidden');
+  const { score, exp, gold, ore } = state.pendingRewards;
+
+  state.hero.score += score;
+  state.hero.gold += gold;
+  state.hero.ore += ore;
+  gainExp(exp);
+
+  if (state.stageIdx < STAGES.length - 1) {
+    state.stageIdx++;
+  }
+  loadStage(state.stageIdx);
+}
+
+function gainExp(amount) {
+  state.hero.exp += amount;
+  let leveledUp = false;
+  while (state.hero.exp >= state.hero.nextExp) {
+    state.hero.exp -= state.hero.nextExp;
+    state.hero.lvl++;
+    state.hero.nextExp = Math.round(state.hero.nextExp * 1.35);
+    state.hero.maxHp += 35;
+    state.hero.hp = state.hero.maxHp;
+    state.hero.mp = state.hero.maxMp;
+    state.hero.baseAtk += 7;
+    leveledUp = true;
+  }
+  if (leveledUp) {
+    sfx.levelUp();
+    spawnHitParticles(heroPos, 0x34d399, 30);
+    showToast(`🎉 勇者升級至 Lv.${state.hero.lvl}！生命與魔力全滿，基礎攻擊提升！`);
+  }
+  updateHUD();
+}
+
+/**
+ * ============================================================================
+ * 7. STAGE NAVIGATION, BLACKSMITH CRAFTING & UI UPDATES
+ * ============================================================================
+ */
+function loadStage(idx) {
+  state.stageIdx = idx;
+  const stage = STAGES[idx];
+  state.enemy.maxHp = stage.maxHp;
+  state.enemy.hp = stage.maxHp;
+  state.enemy.atk = stage.atk;
+  state.enemy.isDead = false;
+
+  // Reset per-battle turn states
+  state.turn.number = 1;
+  state.hero.battleAtkBonusPct = 0;
+  state.hero.shieldBlockPct = 0;
+  state.hero.shieldReflectPct = 0;
+  if (heroShieldMesh) heroShieldMesh.visible = false;
+  heroPos.copy(HERO_HOME_POS);
+
+  rollEnemyIntent();
+  spawnEnemy3D(stage);
+  setTurnPhase('PLAYER_INPUT');
+  updateHUD();
+}
+
+function prevStage() {
+  const nextIdx = (state.stageIdx - 1 + STAGES.length) % STAGES.length;
+  loadStage(nextIdx);
+  showToast(`已切換至第 ${STAGES[nextIdx].stage} 關：${STAGES[nextIdx].name}`);
+}
+
+function nextStage() {
+  const nextIdx = (state.stageIdx + 1) % STAGES.length;
+  loadStage(nextIdx);
+  showToast(`已切換至第 ${STAGES[nextIdx].stage} 關：${STAGES[nextIdx].name}`);
+}
+
+function setDifficulty(tier) {
+  state.difficulty = tier;
+  const map = {
+    basic: { id: 'diff-basic', activeClass: 'bg-emerald-500 text-slate-950 shadow' },
+    extended: { id: 'diff-extended', activeClass: 'bg-sky-400 text-slate-950 shadow' },
+    challenge: { id: 'diff-challenge', activeClass: 'bg-rose-500 text-white shadow' }
+  };
+  Object.keys(map).forEach((k) => {
+    const btn = document.getElementById(map[k].id);
+    if (k === tier) {
+      btn.className = `diff-btn px-2.5 py-1 rounded-xl text-xs font-black transition ${map[k].activeClass}`;
+    } else {
+      btn.className = 'diff-btn px-2.5 py-1 rounded-xl text-xs font-black transition bg-slate-800 text-slate-300 hover:bg-slate-700';
+    }
+  });
+  const names = { basic: '基礎級 (Basic)', extended: '延展級 (Extended)', challenge: '挑戰級 (Challenge)' };
+  showToast(`題庫已切換至：【${names[tier]}】`);
+}
+
+function openBlacksmith() {
+  renderBlacksmithList();
+  document.getElementById('blacksmith-modal').classList.remove('hidden');
+}
+
+function openFormulaSheet() {
+  document.getElementById('formula-modal').classList.remove('hidden');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+function renderBlacksmithList() {
+  document.getElementById('bs-gold').textContent = `${state.hero.gold} 🪙`;
+  document.getElementById('bs-ore').textContent = `${state.hero.ore} 💎`;
+  document.getElementById('bs-atk').textContent = `${getTotalAtk()} ⚔️`;
+
+  const list = document.getElementById('weapon-list');
+  list.innerHTML = '';
+
+  WEAPONS.forEach((w) => {
+    const unlocked = state.hero.unlockedWeapons.includes(w.id);
+    const equipped = state.hero.equippedWeapon === w.id;
+    const enhLvl = getWeaponEnhanceLevel(w.id);
+    const totalWBonus = getWeaponTotalAtkBonus(w.id);
+    const enhCost = getWeaponEnhanceCost(w.id);
+    const canAffordCraft = state.hero.gold >= w.goldCost && state.hero.ore >= w.oreCost;
+    const canAffordEnhance = state.hero.gold >= enhCost.gold && state.hero.ore >= enhCost.ore;
+    const isMaxEnhance = enhLvl >= 10;
+
+    const card = document.createElement('div');
+    card.className = `flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl border ${
+      equipped
+        ? 'bg-amber-950/40 border-amber-400'
+        : unlocked
+        ? 'bg-slate-800/80 border-slate-600'
+        : 'bg-slate-800/40 border-slate-700/70'
+    }`;
+
+    let actionBtnHTML = '';
+    if (unlocked) {
+      const equipPart = equipped
+        ? `<span class="bg-amber-500/20 text-amber-300 border border-amber-400/50 font-black text-xs px-3 py-1.5 rounded-xl text-center">✔ 裝備中</span>`
+        : `<button onclick="equipWeapon(${w.id})" class="rpg-btn bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs px-3 py-1.5 rounded-xl">裝備</button>`;
+
+      const enhancePart = isMaxEnhance
+        ? `<span class="bg-purple-500/20 text-purple-200 border border-purple-400/50 font-black text-xs px-3 py-1.5 rounded-xl text-center">✨ 已滿級 (+10)</span>`
+        : `<button onclick="enhanceWeapon(${w.id})" ${canAffordEnhance ? '' : 'disabled'} class="rpg-btn bg-gradient-to-r from-cyan-400 to-indigo-500 text-slate-950 font-black text-xs px-3 py-1.5 rounded-xl">
+            🔨 強化 +${enhLvl + 1} (${enhCost.gold}🪙 + ${enhCost.ore}💎)
+          </button>`;
+
+      actionBtnHTML = `<div class="flex flex-wrap items-center gap-1.5 justify-end">${equipPart}${enhancePart}</div>`;
+    } else {
+      actionBtnHTML = `<button onclick="craftWeapon(${w.id})" ${canAffordCraft ? '' : 'disabled'} class="rpg-btn bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 font-black text-xs px-4 py-2 rounded-xl">
+        鍛造 (${w.goldCost}🪙 + ${w.oreCost}💎)
+      </button>`;
+    }
+
+    card.innerHTML = `
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-black text-base text-white">${getWeaponDisplayName(w.id)}</span>
+          <span class="bg-slate-900 text-amber-300 text-xs font-bold px-2 py-0.5 rounded-md border border-slate-700">攻擊 +${totalWBonus}</span>
+          ${enhLvl > 0 ? `<span class="bg-cyan-500/20 text-cyan-200 text-[11px] font-black px-2 py-0.5 rounded-md border border-cyan-400/40">強化 Lv.${enhLvl}</span>` : ''}
+        </div>
+        <p class="text-xs text-slate-300 mt-1">${w.desc}</p>
+      </div>
+      <div class="shrink-0">${actionBtnHTML}</div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function enhanceWeapon(id) {
+  const w = WEAPONS[id];
+  if (!w || !state.hero.unlockedWeapons.includes(id)) return;
+  const enhLvl = getWeaponEnhanceLevel(id);
+  if (enhLvl >= 10) {
+    showToast('✨ 此武器已達最高強化等級 (+10)！');
+    return;
+  }
+  const cost = getWeaponEnhanceCost(id);
+  if (state.hero.gold < cost.gold || state.hero.ore < cost.ore) {
+    showToast('❌ 金幣或代數礦石(鑽石)不足！');
+    return;
+  }
+  state.hero.gold -= cost.gold;
+  state.hero.ore -= cost.ore;
+  state.hero.weaponEnhanceLevels[id] = enhLvl + 1;
+  state.hero.equippedWeapon = id;
+
+  sfx.craft();
+  updateHero3DWeapon();
+  spawnHitParticles(heroPos, 0x38bdf8, 36);
+  renderBlacksmithList();
+  updateHUD();
+  showToast(`🔨 強化成功！【${getWeaponDisplayName(id)}】攻擊加成提升至 +${getWeaponTotalAtkBonus(id)}！`);
+}
+
+function craftWeapon(id) {
+  const w = WEAPONS[id];
+  if (!w || state.hero.unlockedWeapons.includes(id)) return;
+  if (state.hero.gold < w.goldCost || state.hero.ore < w.oreCost) {
+    showToast('❌ 金幣或代數礦石不足！請討伐怪獸並開啟黃金寶箱。');
+    return;
+  }
+  state.hero.gold -= w.goldCost;
+  state.hero.ore -= w.oreCost;
+  state.hero.unlockedWeapons.push(id);
+  state.hero.equippedWeapon = id;
+
+  sfx.craft();
+  updateHero3DWeapon();
+  spawnHitParticles(heroPos, w.color, 35);
+  renderBlacksmithList();
+  updateHUD();
+  showToast(`⚒️ 成功鍛造並裝備【${w.name}】！3D 外觀與攻擊力已全面升級！`);
+}
+
+function equipWeapon(id) {
+  if (!state.hero.unlockedWeapons.includes(id)) return;
+  state.hero.equippedWeapon = id;
+  sfx.craft();
+  updateHero3DWeapon();
+  renderBlacksmithList();
+  updateHUD();
+  showToast(`⚔️ 已切換裝備：【${WEAPONS[id].name}】`);
+}
+
+function updateHUD() {
+  const h = state.hero;
+  document.getElementById('hero-lvl-badge').textContent = `Lv.${h.lvl}`;
+  document.getElementById('hero-hp-text').textContent = `${h.hp} / ${h.maxHp}`;
+  document.getElementById('hero-hp-bar').style.width = `${(h.hp / h.maxHp) * 100}%`;
+
+  document.getElementById('hero-mp-text').textContent = `${h.mp}/${h.maxMp}`;
+  document.getElementById('hero-mp-bar').style.width = `${(h.mp / h.maxMp) * 100}%`;
+
+  document.getElementById('hero-rage-text').textContent = `${h.rage}%`;
+  document.getElementById('hero-rage-bar').style.width = `${h.rage}%`;
+
+  const ultBtn = document.getElementById('cmd-ult');
+  if (h.rage >= 100) {
+    ultBtn.classList.add('glow-ult');
+    document.getElementById('cmd-ult-sub').textContent = '✨ 怒氣已滿！點擊釋放';
+  } else {
+    ultBtn.classList.remove('glow-ult');
+    document.getElementById('cmd-ult-sub').textContent = `需 100% 怒氣 (${h.rage}%)`;
+  }
+  if (state.turn.phase === 'PLAYER_INPUT') {
+    ultBtn.disabled = h.rage < 100;
+  }
+
+  document.getElementById('cmd-heal-sub').textContent =
+    h.mp >= 30 ? '耗 30 MP 直接回復 35%' : '魔力不足 · 解題免費回 35%';
+
+  document.getElementById('hero-exp-text').textContent = `${h.exp} / ${h.nextExp}`;
+  document.getElementById('hero-exp-bar').style.width = `${Math.min(100, (h.exp / h.nextExp) * 100)}%`;
+
+  document.getElementById('hero-atk-text').textContent = `⚔️ ${getTotalAtk()}`;
+  document.getElementById('hero-gold-text').textContent = `🪙 ${h.gold}`;
+  document.getElementById('hero-ore-text').textContent = `💎 ${h.ore}`;
+  document.getElementById('hero-score-text').textContent = `🏅 ${h.score.toLocaleString()}`;
+  document.getElementById('hero-weapon-name').textContent = getWeaponDisplayName(h.equippedWeapon);
+
+  const buffBadge = document.getElementById('atk-buff-badge');
+  if (h.battleAtkBonusPct > 0) {
+    buffBadge.classList.remove('hidden');
+    buffBadge.textContent = `⚡ +${h.battleAtkBonusPct}%`;
+  } else {
+    buffBadge.classList.add('hidden');
+  }
+
+  const shieldBadge = document.getElementById('shield-badge');
+  if (h.shieldBlockPct > 0) {
+    shieldBadge.classList.remove('hidden');
+    shieldBadge.textContent = `🛡️ 護盾 ${Math.round(h.shieldBlockPct * 100)}%`;
+  } else {
+    shieldBadge.classList.add('hidden');
+  }
+
+  const st = STAGES[state.stageIdx];
+  document.getElementById('stage-badge').textContent = `第 ${st.stage} 關`;
+  document.getElementById('enemy-name').textContent = st.name;
+  document.getElementById('enemy-lvl').textContent = `Lv.${st.lvl}`;
+  document.getElementById('enemy-trait').textContent = st.trait;
+  document.getElementById('enemy-hp-text').textContent = `${state.enemy.hp} / ${state.enemy.maxHp}`;
+  document.getElementById('enemy-hp-bar').style.width = `${(state.enemy.hp / state.enemy.maxHp) * 100}%`;
+  document.getElementById('enemy-intent-text').textContent = state.enemy.intent.label;
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast-banner');
+  el.textContent = msg;
+  el.classList.remove('opacity-0');
+  el.classList.add('opacity-100');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('opacity-100');
+    el.classList.add('opacity-0');
+  }, 2800);
+}
+
+/**
+ * ============================================================================
+ * 8. MAIN 3D ANIMATION & TURN-BASED CAMERA LOOP
+ * ============================================================================
+ */
+let lastTime = performance.now();
+let clockTime = 0;
+
+function animateLoop(now) {
+  requestAnimationFrame(animateLoop);
+  const dt = Math.min(0.05, (now - lastTime) / 1000);
+  lastTime = now;
+  clockTime += dt;
+
+  // 1. Hero Pose, Dash & Swing Animation
+  heroGroup.position.copy(heroPos);
+  heroGroup.rotation.y = heroRotY;
+
+  if (state.hero.hp <= 0) {
+    // Fallen pose when defeated
+    heroGroup.rotation.z = Math.PI / 2;
+    heroGroup.position.y = 0.45;
+  } else {
+    heroGroup.rotation.z = 0;
+    const isDashing = heroPos.distanceTo(HERO_HOME_POS) > 0.25;
+    if (isDashing) {
+      heroLeftLeg.rotation.x = Math.sin(clockTime * 22) * 0.7;
+      heroRightLeg.rotation.x = -Math.sin(clockTime * 22) * 0.7;
+    } else {
+      heroLeftLeg.rotation.x *= 0.85;
+      heroRightLeg.rotation.x *= 0.85;
+      heroGroup.position.y = Math.abs(Math.sin(clockTime * 2.6)) * 0.06;
+    }
+  }
+
+  // Right Arm Weapon Swing & Shield / Heal Beam Effects
+  if (heroSwingAnim > 0) {
+    heroSwingAnim = Math.max(0, heroSwingAnim - dt * 3.8);
+    heroRightArm.rotation.x = -Math.sin(heroSwingAnim * Math.PI) * 2.1;
+  } else {
+    heroRightArm.rotation.x = Math.sin(clockTime * 2.6) * 0.08;
+  }
+
+  if (heroShieldMesh && heroShieldMesh.visible) {
+    heroShieldMesh.rotation.y += dt * 1.4;
+    heroShieldMesh.rotation.x += dt * 0.6;
+  }
+
+  if (healBeamMesh) {
+    if (healBeamTimer > 0) {
+      healBeamTimer = Math.max(0, healBeamTimer - dt);
+      healBeamMesh.visible = true;
+      healBeamMesh.rotation.y += dt * 4;
+      healBeamMesh.material.opacity = Math.min(0.55, healBeamTimer * 0.55);
+    } else {
+      healBeamMesh.visible = false;
+    }
+  }
+
+  // Spin 3D Victory Chest if spawned
+  if (chestMesh) {
+    chestMesh.rotation.y += dt * 1.5;
+    chestMesh.position.y = Math.abs(Math.sin(clockTime * 3.2)) * 0.18;
+  }
+
+  // 2. Enemy Lunge & Hit Recoil Animation
+  if (enemyGroup && !state.enemy.isDead) {
+    if (enemyLungeAnim > 0) {
+      enemyLungeAnim = Math.max(0, enemyLungeAnim - dt * 2.8);
+      const lungeOffset = Math.sin(enemyLungeAnim * Math.PI) * 1.35;
+      const dirToHero = new THREE.Vector3().subVectors(HERO_HOME_POS, ENEMY_HOME_POS).normalize();
+      enemyGroup.position.copy(ENEMY_HOME_POS).addScaledVector(dirToHero, lungeOffset);
+      enemyGroup.scale.setScalar(1 + Math.sin(enemyLungeAnim * Math.PI) * 0.14);
+    } else if (enemyHitAnim > 0) {
+      enemyHitAnim = Math.max(0, enemyHitAnim - dt * 3.5);
+      enemyGroup.position.copy(ENEMY_HOME_POS);
+      enemyGroup.position.x += Math.sin(enemyHitAnim * 35) * 0.25 * enemyHitAnim;
+      enemyGroup.scale.setScalar(1);
+    } else {
+      enemyGroup.position.copy(ENEMY_HOME_POS);
+      enemyGroup.position.y = Math.abs(Math.sin(clockTime * 2.2)) * 0.1;
+      enemyGroup.scale.setScalar(1);
+    }
+  }
+
+  // 2.5 Enemy Skill Projectiles Update
+  for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+    const proj = enemyProjectiles[i];
+    proj.progress += dt * proj.speed;
+    const t = Math.min(1, proj.progress);
+    proj.mesh.position.lerpVectors(proj.start, proj.target, t);
+    // Arc upward slightly for heavy meteor attack
+    if (proj.isHeavy) {
+      proj.mesh.position.y += Math.sin(t * Math.PI) * 1.6;
+      proj.mesh.rotation.x += 8 * dt;
+      proj.mesh.rotation.y += 8 * dt;
+    } else {
+      proj.mesh.rotation.z += 10 * dt;
+    }
+    // Trail spark particles
+    if (Math.random() < 0.65) {
+      spawnHitParticles(proj.mesh.position.clone().add(new THREE.Vector3(0, -1.0, 0)), proj.color, 2);
+    }
+    if (t >= 1) {
+      spawnHitParticles(heroPos, proj.color, proj.isHeavy ? 32 : 18);
+      scene.remove(proj.mesh);
+      enemyProjectiles.splice(i, 1);
+      if (proj.onImpact) proj.onImpact();
+    }
+  }
+
+  // 3. Ultimate Sword Rain Falling
+  for (let i = swordRainMeshes.length - 1; i >= 0; i--) {
+    const s = swordRainMeshes[i];
+    s.mesh.position.y -= s.speed * dt;
+    if (s.mesh.position.y <= 0.3) {
+      spawnHitParticles(s.mesh.position, 0xf43f5e, 4);
+      scene.remove(s.mesh);
+      swordRainMeshes.splice(i, 1);
+    }
+  }
+
+  // 4. Particles & Slash Arcs Update
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    p.vel.y -= 14 * dt;
+    p.mesh.position.addScaledVector(p.vel, dt);
+    p.mesh.rotation.x += 5 * dt;
+    p.mesh.rotation.y += 5 * dt;
+    p.mesh.scale.setScalar(Math.max(0.01, p.life));
+    if (p.life <= 0) {
+      scene.remove(p.mesh);
+      particles.splice(i, 1);
+    }
+  }
+
+  for (let i = slashArcs.length - 1; i >= 0; i--) {
+    const a = slashArcs[i];
+    a.life -= dt;
+    a.mesh.scale.addScalar(dt * 3.5);
+    a.mesh.material.opacity = Math.max(0, a.life / 0.35);
+    if (a.life <= 0) {
+      scene.remove(a.mesh);
+      slashArcs.splice(i, 1);
+    }
+  }
+
+  // 5. Dynamic Turn-Based Camera Framing + Orbit Offset
+  let baseCamPos = new THREE.Vector3(-1.2, 6.8, 10.6);
+  let baseLookAt = new THREE.Vector3(0.3, 1.3, -0.2);
+
+  if (state.turn.cameraFocus === 'PLAYER') {
+    baseCamPos.set(-4.6, 5.4, 8.6);
+    baseLookAt.set(-0.3, 1.3, 0.2);
+  } else if (state.turn.cameraFocus === 'ENEMY') {
+    baseCamPos.set(1.2, 6.2, 9.4);
+    baseLookAt.set(1.6, 1.4, -0.6);
+  }
+
+  // Apply user orbit drag offset around arena center
+  const offsetFromCenter = baseCamPos.clone();
+  const radius = Math.hypot(offsetFromCenter.x, offsetFromCenter.z);
+  const baseAngle = Math.atan2(offsetFromCenter.x, offsetFromCenter.z) + userCamYawOffset;
+  const targetCamPos = new THREE.Vector3(
+    Math.sin(baseAngle) * radius,
+    Math.max(3.2, baseCamPos.y + userCamPitchOffset * 8),
+    Math.cos(baseAngle) * radius
+  );
+
+  currentCamPos.lerp(targetCamPos, 0.08);
+  currentLookAt.lerp(baseLookAt, 0.1);
+  camera.position.copy(currentCamPos);
+
+  if (cameraShakeTimer > 0) {
+    cameraShakeTimer = Math.max(0, cameraShakeTimer - dt);
+    const intensity = cameraShakeTimer * 1.1;
+    camera.position.x += (Math.random() - 0.5) * intensity;
+    camera.position.y += (Math.random() - 0.5) * intensity;
+  }
+
+  camera.lookAt(currentLookAt);
+
+  renderer.render(scene, camera);
+}
+
+window.onload = function () {
+  initThreeJS();
+  animateLoop(performance.now());
+  showToast('⚔️ 回合制戰鬥開始！選擇【聚力代數斬】或【恆等式護盾】制敵！');
+};
+</script>
+</body>
+</html>
